@@ -1,5 +1,4 @@
 import React from 'react';
-import { Menu } from 'lucide-react';
 
 export default function PageHeader({ title, subtitle, action }) {
   return (
@@ -10,13 +9,5 @@ export default function PageHeader({ title, subtitle, action }) {
       </div>
       {action}
     </div>
-  );
-}
-
-export function MobileMenuButton({ onClick }) {
-  return (
-    <button className="lg:hidden mb-4 text-stone-600" onClick={onClick}>
-      <Menu size={24} />
-    </button>
   );
 }

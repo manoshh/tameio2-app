@@ -25,7 +25,12 @@ export default function Sidebar({ open, onOpenChange, pathname }) {
           </div>
           <span className="font-semibold tracking-tight">Κοινό Ταμείο</span>
         </div>
-        <button className="lg:hidden text-stone-400" onClick={() => onOpenChange(false)}>
+        <button
+          type="button"
+          className="lg:hidden -mr-2 p-2 rounded-lg text-stone-400 hover:bg-stone-100 transition-colors"
+          onClick={() => onOpenChange(false)}
+          aria-label="Κλείσιμο μενού"
+        >
           <X size={20} />
         </button>
       </div>
@@ -61,9 +66,9 @@ export default function Sidebar({ open, onOpenChange, pathname }) {
         {content}
       </aside>
       {open && (
-        <div className="lg:hidden fixed inset-0 z-50">
+        <div className="lg:hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Μενού">
           <div className="absolute inset-0 bg-stone-900/40" onClick={() => onOpenChange(false)} />
-          <div className="absolute inset-y-0 left-0 w-64 bg-white shadow-xl">{content}</div>
+          <div className="absolute inset-y-0 left-0 w-64 max-w-[80vw] bg-white shadow-xl">{content}</div>
         </div>
       )}
     </>
