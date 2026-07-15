@@ -45,7 +45,7 @@ export default function SettingsPage() {
   };
 
   const savePassword = async () => {
-    if (pwd.length < 8) return toast({ title: 'Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες', variant: 'destructive' });
+    if (pwd.length < 4) return toast({ title: 'Ο κωδικός πρέπει να έχει τουλάχιστον 4 χαρακτήρες', variant: 'destructive' });
     setBusy(true);
     try {
       await updatePassword(currentPwd, pwd, email);
@@ -81,7 +81,7 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Νέος κωδικός</Label>
-              <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="new-password" placeholder="Τουλάχιστον 8 χαρακτήρες" />
+              <Input type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="new-password" placeholder="Τουλάχιστον 4 χαρακτήρες" />
             </div>
             <div className="space-y-1.5">
               <Label>Email ανάκτησης</Label>

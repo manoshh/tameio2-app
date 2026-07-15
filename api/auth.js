@@ -4,7 +4,7 @@ import { HttpError } from './_lib/entities.js';
 import { issueCookie, clearCookie, isAuthenticated, requireAuth } from './_lib/session.js';
 
 const BCRYPT_ROUNDS = 12;
-const MIN_PASSWORD_LENGTH = 8;
+const MIN_PASSWORD_LENGTH = 4;
 
 // Το app_config είναι σκόπιμα εκτός του /api/data whitelist: το hash του κωδικού
 // δεν πρέπει να είναι ποτέ αναγνώσιμο από τον client.

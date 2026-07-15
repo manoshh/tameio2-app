@@ -16,7 +16,7 @@ export default function GateSetup() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (password.length < 8) return toast({ title: 'Ο κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες', variant: 'destructive' });
+    if (password.length < 4) return toast({ title: 'Ο κωδικός πρέπει να έχει τουλάχιστον 4 χαρακτήρες', variant: 'destructive' });
     if (password !== confirm) return toast({ title: 'Οι κωδικοί δεν ταιριάζουν', variant: 'destructive' });
     setBusy(true);
     try {
