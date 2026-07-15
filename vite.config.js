@@ -5,7 +5,11 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: { '@': path.resolve(__dirname, './src') },
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+      // Λογική που μοιράζονται frontend και serverless functions.
+      '@shared': path.resolve(__dirname, './shared'),
+    },
   },
   server: {
     // Στο local dev το `vercel dev` σερβίρει τις serverless functions στο :3000.

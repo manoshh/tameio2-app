@@ -3,11 +3,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 
-import { listSettlements, listAllEntries, getSettings, fmt, monthLabel } from '@/lib/api';
+import { listSettlements, fmt, monthLabel } from '@/lib/api';
 import PageHeader from '@/components/PageHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Undo2 } from 'lucide-react';
-import { db } from '@/api/client';
+import { settlements as settlementsApi } from '@/api/client';
 
 export default function Settlements() {
   const { toast } = useToast();
@@ -25,20 +25,11 @@ export default function Settlements() {
     setUndoOpen(false);
     setBusy(true);
     try {
-      const [all, st, settings] = await Promise.all([listAllEntries(), listSettlements(), getSettings()]);
-      const latest = st[0];
-      if (!latest) throw new Error('no settlement');
-
-      await db.entities.LedgerEntry.deleteMany({ carryOverSettlementId: latest.id });
-      const archived = all.filter((e) => e.settlementId === latest.id);
-      if (archived.length) await db.entities.LedgerEntry.bulkUpdate(archived.map((e) => ({ id: e.id, settlementId: '' })));
-      await db.entities.Settings.update(settings.id, { manosOwed: latest.manosOwedBefore, eiriniOwed: latest.eiriniOwedBefore });
-      await db.entities.Settlement.delete(latest.id);
-
+      await settlementsApi.undoClose();
       toast({ title: 'Το κλείσιμο αναιρέθηκε' });
       await load();
     } catch (err) {
-      toast({ title: 'Σφάλμα αναίρεσης', description: String(err), variant: 'destructive' });
+      toast({ title: 'Σφάλμα αναίρεσης', description: err.message, variant: 'destructive' });
     } finally {
       setBusy(false);
     }

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Users, Leaf, CalendarCheck, Target } from 'lucide-react';
 import { listAllEntries, listSettlements, getSettings, fmt, fmtDate } from '@/lib/api';
-import { sumActive } from '@/lib/finance';
+import { sumActive } from '@shared/finance';
 import PageHeader from '@/components/PageHeader';
 
 export default function Home() {

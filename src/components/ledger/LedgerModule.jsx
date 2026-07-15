@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { listEntries, getSettings, fmt } from '@/lib/api';
-import { round2, sumActive } from '@/lib/finance';
+import { round2, sumActive } from '@shared/finance';
 import EntryForm from './EntryForm';
 import EntryList from './EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';

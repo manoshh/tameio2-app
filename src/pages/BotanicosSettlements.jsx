@@ -3,12 +3,12 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 
-import { listBotanicosSettlements, listAllEntries, getSettings, fmt, monthLabel, fmtDate } from '@/lib/api';
-import { sumActive } from '@/lib/finance';
+import { listBotanicosSettlements, listAllEntries, fmt, monthLabel, fmtDate } from '@/lib/api';
+import { sumActive } from '@shared/finance';
 import PageHeader from '@/components/PageHeader';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { Archive, Undo2 } from 'lucide-react';
-import { db } from '@/api/client';
+import { settlements as settlementsApi } from '@/api/client';
 
 export default function BotanicosSettlements() {
   const { toast } = useToast();
@@ -29,19 +29,11 @@ export default function BotanicosSettlements() {
     setSettleOpen(false);
     setBusy(true);
     try {
-      const [entries, settings] = await Promise.all([listAllEntries(), getSettings()]);
-      const balanceBefore = sumActive(entries, (e) => e.module === 'botanicos');
-      const active = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
-      const now = new Date();
-      const bs = await db.entities.BotanicosSettlement.create({
-        month: now.getMonth() + 1, year: now.getFullYear(), balanceBefore, timestamp: now.toISOString(),
-      });
-      if (active.length) await db.entities.LedgerEntry.bulkUpdate(active.map((e) => ({ id: e.id, settlementId: bs.id })));
-      await db.entities.Settings.update(settings.id, { botanicosBalance: 0 });
+      await settlementsApi.botanicosSettle();
       toast({ title: 'Ο διακανονισμός Βοτανικού ολοκληρώθηκε' });
       await load();
     } catch (err) {
-      toast({ title: 'Σφάλμα', description: String(err), variant: 'destructive' });
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     } finally {
       setBusy(false);
     }
@@ -51,17 +43,11 @@ export default function BotanicosSettlements() {
     setUndoOpen(false);
     setBusy(true);
     try {
-      const [all, list, settings] = await Promise.all([listAllEntries(), listBotanicosSettlements(), getSettings()]);
-      const latest = list[0];
-      if (!latest) throw new Error('no settlement');
-      const archived = all.filter((e) => e.settlementId === latest.id);
-      if (archived.length) await db.entities.LedgerEntry.bulkUpdate(archived.map((e) => ({ id: e.id, settlementId: '' })));
-      await db.entities.Settings.update(settings.id, { botanicosBalance: latest.balanceBefore });
-      await db.entities.BotanicosSettlement.delete(latest.id);
+      await settlementsApi.undoBotanicos();
       toast({ title: 'Ο διακανονισμός αναιρέθηκε' });
       await load();
     } catch (err) {
-      toast({ title: 'Σφάλμα', description: String(err), variant: 'destructive' });
+      toast({ title: 'Σφάλμα', description: err.message, variant: 'destructive' });
     } finally {
       setBusy(false);
     }

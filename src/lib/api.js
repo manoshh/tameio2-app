@@ -1,5 +1,5 @@
 
-import { round2 } from './finance';
+import { round2 } from '@shared/finance';
 import { db } from '@/api/client';
 
 export async function getSettings() {

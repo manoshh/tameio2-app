@@ -59,6 +59,15 @@ export const db = {
   }),
 };
 
+// Οι διακανονισμοί δεν περνούν από το generic entity API: ο server τους εκτελεί
+// ως μία ατομική πράξη και υπολογίζει ο ίδιος τα ποσά.
+export const settlements = {
+  close: (enteredBalance) => rpc('/api/settlements', { op: 'close', args: { enteredBalance } }),
+  undoClose: () => rpc('/api/settlements', { op: 'undoClose' }),
+  botanicosSettle: () => rpc('/api/settlements', { op: 'botanicosSettle' }),
+  undoBotanicos: () => rpc('/api/settlements', { op: 'undoBotanicos' }),
+};
+
 export const auth = {
   status: () => rpc('/api/auth', { op: 'status' }),
   setup: (password, recoveryEmail) => rpc('/api/auth', { op: 'setup', args: { password, recoveryEmail } }),

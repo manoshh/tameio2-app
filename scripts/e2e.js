@@ -15,6 +15,7 @@ dotenv.config({ path: path.join(root, '.env.local') });
 
 const { default: dataHandler } = await import(path.join(root, 'api/data.js'));
 const { default: authHandler } = await import(path.join(root, 'api/auth.js'));
+const { default: settlementsHandler } = await import(path.join(root, 'api/settlements.js'));
 const { query } = await import(path.join(root, 'api/_lib/db.js'));
 
 const TEST_PASSWORD = 'test-password-123';
@@ -67,6 +68,7 @@ function check(name, cond, detail = '') {
 
 const data = (body) => call(dataHandler, body);
 const auth = (body, o) => call(authHandler, body, o);
+const settle = (body) => call(settlementsHandler, body);
 const entry = (over = {}) => ({
   module: 'person', person: 'manos', amount: 12.34, description: TEST_TAG,
   date: TEST_DATE, settlementId: '', carryOverSettlementId: '', ...over,
@@ -180,6 +182,104 @@ check('Τα ποσά Settings είναι numbers', typeof setCreate.body?.target
 
 const noFilter = await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { where: {} } });
 check('deleteMany χωρίς φίλτρο απορρίπτεται (όχι μαζική διαγραφή)', noFilter.statusCode === 400, `πήρε ${noFilter.statusCode}`);
+
+// ── Μηνιαίο κλείσιμο ───────────────────────────────────────────────────
+// Σενάριο με αριθμούς υπολογισμένους στο χέρι:
+//   στόχος 1000 | μετρημένο 500 | Μάνος χρωστά 100 | Ειρήνη 50 | Βοτανικός 30
+//   effective = 500 - 30            = 470
+//   refill    = 1000 - 470          = 530
+//   shareEach = 530 / 2             = 265
+//   Μάνος:  offset 100 → συνεισφορά 165, μετά 0
+//   Ειρήνη: offset  50 → συνεισφορά 215, μετά 0
+await query('delete from ledger_entry');
+await query('delete from settings');
+await data({ entity: 'Settings', op: 'create', args: { data: { targetReserve: 1000, manosOwed: 0, eiriniOwed: 0, botanicosBalance: 0 } } });
+await data({ entity: 'LedgerEntry', op: 'bulkCreate', args: { items: [
+  entry({ person: 'manos', amount: 100 }),
+  entry({ person: 'eirini', amount: 50 }),
+  entry({ module: 'botanicos', person: null, amount: 30 }),
+] } });
+
+// Ο client στέλνει και σκουπίδια μαζί: ο server πρέπει να τα αγνοήσει εντελώς
+// και να ξαναϋπολογίσει τα πάντα από τη βάση.
+const closed = await settle({ op: 'close', args: {
+  enteredBalance: 500,
+  shareEach: 999999, refillAmount: 999999, manosOwedAfter: -50000, targetReserve: 1,
+} });
+check('Το κλείσιμο πετυχαίνει', closed.statusCode === 200, JSON.stringify(closed.body));
+
+const s = closed.body?.settlement;
+check('refillAmount υπολογίστηκε στον server (530)', s?.refillAmount === 530, `πήρε ${s?.refillAmount}`);
+check('shareEach υπολογίστηκε στον server (265)', s?.shareEach === 265, `πήρε ${s?.shareEach}`);
+check('Αγνοήθηκε το targetReserve του client (1000)', s?.targetReserve === 1000, `πήρε ${s?.targetReserve}`);
+check('enteredBalance = μετρημένο μείον Βοτανικό (470)', s?.enteredBalance === 470, `πήρε ${s?.enteredBalance}`);
+check('Μάνος: offset 100', s?.manosOffset === 100, `πήρε ${s?.manosOffset}`);
+check('Μάνος: συνεισφορά 165', s?.manosContribution === 165, `πήρε ${s?.manosContribution}`);
+check('Αγνοήθηκε το manosOwedAfter του client (0)', s?.manosOwedAfter === 0, `πήρε ${s?.manosOwedAfter}`);
+check('Ειρήνη: συνεισφορά 215', s?.eiriniContribution === 215, `πήρε ${s?.eiriniContribution}`);
+check('Καταγράφηκε το υπόλοιπο Βοτανικού (30)', s?.botanicosBalanceBefore === 30, `πήρε ${s?.botanicosBalanceBefore}`);
+
+const afterClose = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
+check('Όλες οι εγγραφές αρχειοθετήθηκαν', afterClose.every((e) => e.settlementId !== ''), JSON.stringify(afterClose.map((e) => e.settlementId)));
+check('Δεν δημιουργήθηκαν carry-over (μηδενικά υπόλοιπα)', afterClose.length === 3, `βρέθηκαν ${afterClose.length}`);
+
+const botList = (await data({ entity: 'BotanicosSettlement', op: 'list', args: {} })).body;
+check('Δημιουργήθηκε και διακανονισμός Βοτανικού', botList.length === 1, `βρέθηκαν ${botList.length}`);
+
+const settingsAfter = (await data({ entity: 'Settings', op: 'list', args: {} })).body[0];
+check('Τα υπόλοιπα μηδενίστηκαν στις ρυθμίσεις', settingsAfter?.manosOwed === 0 && settingsAfter?.botanicosBalance === 0);
+
+// ── Αναίρεση κλεισίματος ───────────────────────────────────────────────
+const undone = await settle({ op: 'undoClose' });
+check('Η αναίρεση πετυχαίνει', undone.statusCode === 200, JSON.stringify(undone.body));
+
+const afterUndo = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
+const personActive = afterUndo.filter((e) => e.module === 'person' && e.settlementId === '');
+check('Οι εγγραφές ατόμων επανήλθαν ως ενεργές', personActive.length === 2, `βρέθηκαν ${personActive.length}`);
+check('Ο διακανονισμός διαγράφηκε', (await data({ entity: 'Settlement', op: 'list', args: {} })).body.length === 0);
+
+const settingsUndo = (await data({ entity: 'Settings', op: 'list', args: {} })).body[0];
+check('Τα υπόλοιπα επανήλθαν (Μάνος 100)', settingsUndo?.manosOwed === 100, `πήρε ${settingsUndo?.manosOwed}`);
+
+// ── Carry-over όταν μένει υπόλοιπο ─────────────────────────────────────
+// στόχος 1000, μετρημένο 990, Μάνος χρωστά 100 → refill 10, share 5
+//   offset = clamp(100, -5, 5) = 5 → μετά = 95 → carry-over 95
+await query('delete from ledger_entry');
+await data({ entity: 'LedgerEntry', op: 'create', args: { data: entry({ person: 'manos', amount: 100 }) } });
+const close2 = await settle({ op: 'close', args: { enteredBalance: 990 } });
+check('2ο κλείσιμο πετυχαίνει', close2.statusCode === 200, JSON.stringify(close2.body));
+check('Μάνος: μένει υπόλοιπο 95', close2.body?.settlement?.manosOwedAfter === 95, `πήρε ${close2.body?.settlement?.manosOwedAfter}`);
+
+const carry = (await data({ entity: 'LedgerEntry', op: 'filter', args: { where: { carryOverSettlementId: close2.body?.settlement?.id } } })).body;
+check('Δημιουργήθηκε εγγραφή carry-over', carry.length === 1, `βρέθηκαν ${carry.length}`);
+check('Το carry-over έχει ποσό 95 και είναι ενεργό', carry[0]?.amount === 95 && carry[0]?.settlementId === '', JSON.stringify(carry[0]));
+
+const undo2 = await settle({ op: 'undoClose' });
+check('Η αναίρεση σβήνει το carry-over', undo2.statusCode === 200 &&
+  (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body.length === 1);
+
+// ── Διακανονισμός Βοτανικού μεμονωμένα ─────────────────────────────────
+await query('delete from ledger_entry');
+await data({ entity: 'LedgerEntry', op: 'create', args: { data: entry({ module: 'botanicos', person: null, amount: 42 }) } });
+const bsettle = await settle({ op: 'botanicosSettle' });
+check('Διακανονισμός Βοτανικού', bsettle.statusCode === 200 && bsettle.body?.settlement?.balanceBefore === 42, JSON.stringify(bsettle.body));
+
+const bundo = await settle({ op: 'undoBotanicos' });
+const botAfter = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
+check('Αναίρεση Βοτανικού επαναφέρει την εγγραφή', bundo.statusCode === 200 && botAfter[0]?.settlementId === '');
+
+const emptyUndo = await settle({ op: 'undoClose' });
+check('Αναίρεση χωρίς κλείσιμο απορρίπτεται καθαρά', emptyUndo.statusCode === 404, `πήρε ${emptyUndo.statusCode}`);
+
+const anonSettle = { method: 'POST', body: { op: 'close', args: { enteredBalance: 1 } }, headers: {} };
+const anonSettleRes = mockRes();
+await settlementsHandler(anonSettle, anonSettleRes);
+check('Ανώνυμο κλείσιμο απορρίπτεται με 401', anonSettleRes.statusCode === 401, `πήρε ${anonSettleRes.statusCode}`);
+
+await query('delete from ledger_entry');
+await query('delete from botanicos_settlement');
+await query('delete from settlement');
+await query('delete from settings');
 
 // ── Καθαρισμός ─────────────────────────────────────────────────────────
 await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { where: { description: TEST_TAG } } });

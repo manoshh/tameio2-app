@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 import { getSettings } from '@/lib/api';
-import { round2 } from '@/lib/finance';
+import { round2 } from '@shared/finance';
 import { usePasswordAuth } from '@/lib/passwordAuth';
 import PageHeader from '@/components/PageHeader';
 import { db } from '@/api/client';

@@ -6,11 +6,11 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 
 import { listAllEntries, getSettings, fmt } from '@/lib/api';
-import { round2, sumActive, computeMonthlyClose } from '@/lib/finance';
+import { round2, sumActive, computeMonthlyClose } from '@shared/finance';
 import { owedInfo } from '@/lib/labels';
 import PageHeader from '@/components/PageHeader';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { db } from '@/api/client';
+import { settlements } from '@/api/client';
 
 export default function MonthlyClose() {
   const { toast } = useToast();
@@ -41,49 +41,16 @@ export default function MonthlyClose() {
     setSettleOpen(false);
     setBusy(true);
     try {
-      const now = new Date();
-
-      // 1) Botanicos settlement (after the bank transfer)
-      if (botanicosBal !== 0) {
-        const bs = await db.entities.BotanicosSettlement.create({
-          month: now.getMonth() + 1, year: now.getFullYear(),
-          balanceBefore: botanicosBal, timestamp: now.toISOString(),
-        });
-        const activeBot = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
-        if (activeBot.length) await db.entities.LedgerEntry.bulkUpdate(activeBot.map((e) => ({ id: e.id, settlementId: bs.id })));
-      }
-
-      // 2) Person settlement snapshot (post-transfer effective balance)
-      const settlement = await db.entities.Settlement.create({
-        month: now.getMonth() + 1, year: now.getFullYear(),
-        enteredBalance: calc.enteredBalance, targetReserve: calc.targetReserve,
-        refillAmount: calc.refillAmount, shareEach: calc.shareEach,
-        manosOwedBefore: calc.manos.owedBefore, manosOwedAfter: calc.manos.owedAfter,
-        manosOffset: calc.manos.offset, manosContribution: calc.manos.contribution,
-        eiriniOwedBefore: calc.eirini.owedBefore, eiriniOwedAfter: calc.eirini.owedAfter,
-        eiriniOffset: calc.eirini.offset, eiriniContribution: calc.eirini.contribution,
-        botanicosBalanceBefore: botanicosBal, timestamp: now.toISOString(),
-      });
-
-      const activePerson = entries.filter((e) => e.module === 'person' && !e.settlementId);
-      if (activePerson.length) {
-        await db.entities.LedgerEntry.bulkUpdate(activePerson.map((e) => ({ id: e.id, settlementId: settlement.id })));
-      }
-
-      const today = now.toISOString().slice(0, 10);
-      const carryOvers = [];
-      if (calc.manos.owedAfter !== 0) carryOvers.push({ module: 'person', person: 'manos', amount: calc.manos.owedAfter, description: 'Υπόλοιπο από προηγ. μήνα', date: today, settlementId: '', carryOverSettlementId: settlement.id });
-      if (calc.eirini.owedAfter !== 0) carryOvers.push({ module: 'person', person: 'eirini', amount: calc.eirini.owedAfter, description: 'Υπόλοιπο από προηγ. μήνα', date: today, settlementId: '', carryOverSettlementId: settlement.id });
-      if (carryOvers.length) await db.entities.LedgerEntry.bulkCreate(carryOvers);
-
-      await db.entities.Settings.update(settings.id, { manosOwed: calc.manos.owedAfter, eiriniOwed: calc.eirini.owedAfter, botanicosBalance: 0 });
+      // Ο server ξαναϋπολογίζει τα ποσά από τις εγγραφές και εκτελεί όλα τα
+      // βήματα ως μία ατομική πράξη· εδώ στέλνουμε μόνο το μετρημένο υπόλοιπο.
+      await settlements.close(enteredNum);
 
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       const [e2, s2] = await Promise.all([listAllEntries(), getSettings()]);
       setEntries(e2); setSettings(s2);
       setEntered('');
     } catch (err) {
-      toast({ title: 'Σφάλμα κλεισίματος', description: String(err), variant: 'destructive' });
+      toast({ title: 'Σφάλμα κλεισίματος', description: err.message, variant: 'destructive' });
     } finally {
       setBusy(false);
     }
