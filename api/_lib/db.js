@@ -1,8 +1,14 @@
-import { Pool, neonConfig } from '@neondatabase/serverless';
+import { Pool, neonConfig, types } from '@neondatabase/serverless';
 import ws from 'ws';
 
 // Ο Pool του Neon μιλάει WebSockets· σε Node runtime πρέπει να του δώσουμε implementation.
 if (typeof WebSocket === 'undefined') neonConfig.webSocketConstructor = ws;
+
+// Οι στήλες τύπου `date` (OID 1082) είναι ημερολογιακές ημερομηνίες χωρίς ώρα.
+// Ο driver by default τις κάνει JS Date στην τοπική ζώνη, οπότε οποιαδήποτε
+// μετατροπή σε UTC τις μετακινεί μια μέρα πίσω για ζώνες ανατολικά του
+// Γκρίνουιτς (π.χ. Ελλάδα). Τις κρατάμε ως string 'YYYY-MM-DD' αυτούσιες.
+types.setTypeParser(1082, (value) => value);
 
 if (!process.env.DATABASE_URL) {
   throw new Error('Λείπει το DATABASE_URL. Δες το .env.example.');

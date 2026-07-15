@@ -73,7 +73,6 @@ export function deserializeRow(entity, row) {
   for (const field of entity.numeric) {
     if (out[field] !== null && out[field] !== undefined) out[field] = Number(out[field]);
   }
-  if (out.date instanceof Date) out.date = out.date.toISOString().slice(0, 10);
   return out;
 }
 
