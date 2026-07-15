@@ -1,0 +1,68 @@
+# Ιστορικό αλλαγών
+
+Καταγραφή των αλλαγών στην εφαρμογή, με την πιο πρόσφατη πρώτη.
+
+---
+
+## 2026-07-16 — Μετάβαση από Base44 σε Neon + Vercel
+
+Η πρώτη μεγάλη αλλαγή μετά την εξαγωγή του κώδικα από το Base44.
+
+### Το πρόβλημα που βρέθηκε
+
+Το export από το Base44 ήταν **σπασμένο**. Σε 18 αρχεία είχε προστεθεί στην κορυφή
+μια γραμμή που όριζε ένα ψεύτικο `db` object:
+
+```js
+const db = globalThis.__B44_DB__ || { entities: new Proxy({}, { get:()=>({ filter:async()=>[], ... }) }) };
+```
+
+Αυτό επέστρεφε **άδεια δεδομένα για κάθε ερώτημα** — η εφαρμογή δεν λειτουργούσε.
+Η ίδια γραμμή είχε μπει ακόμη και μέσα στα `README.md`, `AGENTS.md` και `index.html`,
+και είχε αντικαταστήσει τα πραγματικά imports (π.χ. το `vite.config.js` καλούσε
+`base44(...)` χωρίς να το έχει εισάγει). Επιπλέον, ένα find/replace είχε αλλάξει
+κάθε `base44.com` σε `db.com`, σπάζοντας links και σταθερές.
+
+### Τι έγινε
+
+**Backend (νέο)**
+- `db/schema.sql`: schema σε Neon Postgres για τις 5 οντότητες (`settings`,
+  `ledger_entry`, `settlement`, `botanicos_settlement`, `app_config`), με ποσά ως
+  `numeric(12,2)`, constraints και indexes.
+- `api/data.js`: ένα endpoint για όλες τις λειτουργίες δεδομένων.
+- `api/auth.js`: σύνδεση με κοινό κωδικό.
+- `api/_lib/`: σύνδεση βάσης με pooling + transactions, session, whitelist οντοτήτων.
+- `scripts/migrate.js` + `npm run db:migrate`.
+
+**Frontend**
+- `src/api/client.js`: νέος client που **διατηρεί την υπογραφή του παλιού SDK**
+  (`db.entities.X.list(...)`), ώστε οι σελίδες και η λογική τους να μείνουν αμετάβλητες.
+- Αφαιρέθηκε το stub από τα 18 αρχεία· προστέθηκαν τα σωστά imports.
+- `vite.config.js`: αφαίρεση του Base44 plugin, προσθήκη alias `@` και proxy του `/api`.
+
+**Ασφάλεια**
+- Ο κωδικός αποθηκευόταν σε **plaintext** (`passwordPlain`) με unsalted SHA-256, και
+  ο έλεγχος γινόταν στον browser. Τώρα: **bcrypt** (12 rounds), έλεγχος στον server,
+  session σε **httpOnly cookie** με HMAC υπογραφή. Το πεδίο `passwordPlain` καταργήθηκε.
+- Η αλλαγή κωδικού απαιτεί πλέον τον τρέχοντα κωδικό.
+- Το `app_config` είναι εκτός του data API — το hash δεν φτάνει ποτέ στον client.
+- Ελάχιστο μήκος κωδικού: 4 → 8 χαρακτήρες.
+
+**Καθαρισμός**
+- Διαγράφηκε όλο το αχρησιμοποίητο Base44 hosted auth (`Login`, `Register`,
+  `ForgotPassword`, `ResetPassword`, `AuthLayout`, `ProtectedRoute`, `AuthContext`,
+  `app-params`, `UserNotRegisteredError`, `GoogleIcon`) — κανένα δεν ήταν συνδεδεμένο
+  σε route.
+- Αφαιρέθηκε ο φάκελος `base44/` και το `export-report.json`.
+- `index.html`: σωστός τίτλος και favicon αντί των Base44.
+
+### Τι άλλαξε στη συμπεριφορά
+
+- **Αφαιρέθηκε το «στείλε μου τον κωδικό με email».** Έστελνε τον κωδικό σε
+  plaintext, κάτι που είναι αδύνατο (και ανεπιθύμητο) με bcrypt. Εκκρεμεί σωστό
+  reset flow με email.
+- Η αλλαγή κωδικού ζητά τώρα και τον τρέχοντα κωδικό.
+
+### Τι δεν άλλαξε
+
+Η λογική υπολογισμού (`src/lib/finance.js`), οι σελίδες και το UI.
