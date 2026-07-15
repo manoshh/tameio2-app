@@ -1,8 +1,13 @@
 // Inspired by react-hot-toast library
 import { useState, useEffect } from "react";
 
-const TOAST_LIMIT = 20;
-const TOAST_REMOVE_DELAY = 1000000;
+// Πόσα toasts στοιβάζονται ταυτόχρονα.
+const TOAST_LIMIT = 3;
+
+// Καθυστέρηση αφαίρεσης από τη λίστα ΜΕΤΑ το κλείσιμο — όσο χρειάζεται το
+// animation εξόδου. Δεν είναι ο χρόνος εμφάνισης· αυτόν τον ορίζει το
+// `duration` του ToastProvider στο toaster.jsx.
+const TOAST_REMOVE_DELAY = 1000;
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
