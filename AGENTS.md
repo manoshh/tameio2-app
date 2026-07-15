@@ -2,10 +2,10 @@
 
 ## Project Context
 
-Εφαρμογή κοινού ταμείου, αρχικά φτιαγμένη στο Base44 και μεταφερμένη σε
-Neon (Postgres) + Vercel. Δες το `README.md` για setup και deploy.
+Εφαρμογή κοινού ταμείου σε React + Vite, με backend serverless functions στο
+Vercel και βάση Neon (Postgres). Δες το `README.md` για setup και deploy.
 
-Το Base44 δεν χρησιμοποιείται πλέον — μην προσθέτεις εξαρτήσεις ή αναφορές σε αυτό.
+Το stack είναι αυτό και μόνο αυτό: μην προσθέτεις BaaS SDKs ή hosted backends.
 
 ## Key Files
 
@@ -18,8 +18,8 @@ Neon (Postgres) + Vercel. Δες το `README.md` για setup και deploy.
 
 ## Working Notes
 
-- Το frontend διατηρεί σκόπιμα το API σχήμα του παλιού SDK (`db.entities.X.list(...)`).
-  Αν αλλάξεις τον client, κράτα την υπογραφή ή ενημέρωσε όλα τα call sites μαζί.
+- Ο client εκθέτει ένα generic entity API (`db.entities.X.list(...)`). Αν το
+  αλλάξεις, ενημέρωσε όλα τα call sites μαζί.
 - Τα ποσά είναι `numeric(12,2)` στη βάση και επιστρέφονται ως string από την
   Postgres — το `deserializeRow` τα γυρίζει σε number. Νέο αριθμητικό πεδίο πρέπει
   να μπει στη λίστα `numeric` της οντότητας, αλλιώς θα σπάσει η αριθμητική.

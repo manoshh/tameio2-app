@@ -1,8 +1,7 @@
 // Data client προς το Neon, μέσω των serverless functions στο /api.
 //
-// Διατηρεί σκόπιμα την υπογραφή του παλιού Base44 SDK (`db.entities.X.list(...)`)
-// ώστε οι σελίδες να μένουν αμετάβλητες. Η αυθεντικοποίηση γίνεται με httpOnly
-// cookie, οπότε δεν χρειάζεται χειρισμός token εδώ.
+// Η αυθεντικοποίηση γίνεται με httpOnly cookie, οπότε δεν χρειάζεται χειρισμός
+// token εδώ — αρκεί το `credentials: 'same-origin'`.
 
 export class ApiError extends Error {
   constructor(status, message) {
