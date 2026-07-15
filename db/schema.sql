@@ -14,6 +14,17 @@ create table if not exists app_config (
   updated_date  timestamptz not null default now()
 );
 
+-- Μετρητής αποτυχημένων προσπαθειών σύνδεσης, για rate limiting.
+-- key = η IP του επισκέπτη, ή '__global__' για το καθολικό δίχτυ ασφαλείας.
+create table if not exists login_attempt (
+  key              text primary key,
+  "failedAttempts" integer not null default 0,
+  "lockedUntil"    timestamptz,
+  updated_date     timestamptz not null default now()
+);
+
+create index if not exists login_attempt_updated_idx on login_attempt (updated_date);
+
 create table if not exists settings (
   id                 uuid primary key default gen_random_uuid(),
   "targetReserve"    numeric(12,2) not null default 0,

@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { query } from './_lib/db.js';
 import { HttpError } from './_lib/entities.js';
 import { issueCookie, clearCookie, isAuthenticated, requireAuth } from './_lib/session.js';
+import { assertNotLocked, registerFailure, registerSuccess } from './_lib/rateLimit.js';
 
 const BCRYPT_ROUNDS = 12;
 const MIN_PASSWORD_LENGTH = 4;
@@ -56,12 +57,20 @@ const OPERATIONS = {
   },
 
   async login(req, res, { password }) {
+    // Ο έλεγχος κλειδώματος γίνεται ΠΡΙΝ το bcrypt: αλλιώς ο επιτιθέμενος
+    // εξακολουθεί να μας κοστίζει CPU σε κάθε προσπάθεια.
+    await assertNotLocked(req);
+
     const config = await loadConfig();
     if (!config?.initialized) throw new HttpError(409, 'Η εφαρμογή δεν έχει ρυθμιστεί');
 
     const ok = typeof password === 'string' && (await bcrypt.compare(password, config.passwordHash));
-    if (!ok) throw new HttpError(401, 'Λάθος κωδικός');
+    if (!ok) {
+      await registerFailure(req);
+      throw new HttpError(401, 'Λάθος κωδικός');
+    }
 
+    await registerSuccess(req);
     res.setHeader('Set-Cookie', issueCookie());
     return { authed: true };
   },
@@ -73,13 +82,20 @@ const OPERATIONS = {
 
   async updatePassword(req, res, { currentPassword, password, recoveryEmail }) {
     requireAuth(req);
+    await assertNotLocked(req);
+
     const config = await loadConfig();
     if (!config?.initialized) throw new HttpError(409, 'Η εφαρμογή δεν έχει ρυθμιστεί');
 
     // Ζητάμε τον τρέχοντα κωδικό ακόμη κι αν υπάρχει session: αλλιώς ένα
     // ξεχασμένο ανοιχτό session αρκεί για μόνιμη κατάληψη του λογαριασμού.
+    // Μετράει κι αυτό στο rate limiting — είναι κι αυτό έλεγχος κωδικού.
     const ok = typeof currentPassword === 'string' && (await bcrypt.compare(currentPassword, config.passwordHash));
-    if (!ok) throw new HttpError(401, 'Λάθος τρέχων κωδικός');
+    if (!ok) {
+      await registerFailure(req);
+      throw new HttpError(401, 'Λάθος τρέχων κωδικός');
+    }
+    await registerSuccess(req);
     assertPassword(password);
 
     const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);

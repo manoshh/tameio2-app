@@ -52,8 +52,10 @@ function mockRes() {
   return res;
 }
 
-async function call(handler, body, { withCookie = true } = {}) {
-  const req = { method: 'POST', body, headers: withCookie && cookie ? { cookie } : {} };
+async function call(handler, body, { withCookie = true, ip = '10.0.0.1' } = {}) {
+  const headers = { 'x-real-ip': ip };
+  if (withCookie && cookie) headers.cookie = cookie;
+  const req = { method: 'POST', body, headers };
   const res = mockRes();
   await handler(req, res);
   const setCookie = res.headers['Set-Cookie'];
@@ -76,6 +78,7 @@ const entry = (over = {}) => ({
 
 await assertSafeToRun();
 await query('delete from app_config');
+await query('delete from login_attempt');
 
 // ── Auth ───────────────────────────────────────────────────────────────
 const anon = await data({ entity: 'Settings', op: 'list', args: {} });
@@ -117,6 +120,49 @@ const forgedReq = { method: 'POST', body: { entity: 'Settings', op: 'list', args
 const forgedRes = mockRes();
 await dataHandler(forgedReq, forgedRes);
 check('Πλαστό cookie απορρίπτεται', forgedRes.statusCode === 401, `πήρε ${forgedRes.statusCode}`);
+
+// ── Rate limiting ──────────────────────────────────────────────────────
+const CURRENT_PASSWORD = 'νέος-κωδικός-123';
+const ATTACKER_IP = '203.0.113.9';
+const OWNER_IP = '198.51.100.5';
+const login = (password, ip) => auth({ op: 'login', args: { password } }, { withCookie: false, ip });
+
+await query('delete from login_attempt');
+for (let i = 0; i < 5; i++) await login('λάθος', ATTACKER_IP);
+
+// Ακόμη και με σωστό κωδικό, η κλειδωμένη IP απορρίπτεται.
+const locked = await login(CURRENT_PASSWORD, ATTACKER_IP);
+check('Μετά από 5 αποτυχίες η IP κλειδώνεται με 429', locked.statusCode === 429, `πήρε ${locked.statusCode}`);
+check('Το μήνυμα κλειδώματος λέει πόσα λεπτά μένουν', /λεπτ/.test(locked.body?.error || ''), locked.body?.error);
+
+// Το πιο σημαντικό: ο επιτιθέμενος ΔΕΝ κλειδώνει έξω τους ιδιοκτήτες.
+const otherIp = await login(CURRENT_PASSWORD, OWNER_IP);
+check('Άλλη IP δεν επηρεάζεται (δεν γίνεται lockout του ιδιοκτήτη)', otherIp.statusCode === 200, `πήρε ${otherIp.statusCode}`);
+
+await query('delete from login_attempt');
+await login('λάθος', OWNER_IP);
+await login('λάθος', OWNER_IP);
+await login(CURRENT_PASSWORD, OWNER_IP);
+const afterSuccess = await query('select * from login_attempt where key = $1', [OWNER_IP]);
+check('Η επιτυχής σύνδεση μηδενίζει τον μετρητή', afterSuccess.rows.length === 0, `έμειναν ${afterSuccess.rows.length}`);
+
+// Σκόρπιες αποτυχίες σε βάθος χρόνου δεν πρέπει να συσσωρεύονται σε κλείδωμα.
+await query('delete from login_attempt');
+await query(`insert into login_attempt (key, "failedAttempts", updated_date) values ($1, 4, now() - interval '20 minutes')`, [OWNER_IP]);
+await login('λάθος', OWNER_IP);
+const windowed = await query('select "failedAttempts", "lockedUntil" from login_attempt where key = $1', [OWNER_IP]);
+check('Αποτυχίες εκτός παραθύρου 15 λεπτών δεν συσσωρεύονται',
+  windowed.rows[0]?.failedAttempts === 1 && !windowed.rows[0]?.lockedUntil, JSON.stringify(windowed.rows[0]));
+
+// Το καθολικό δίχτυ πιάνει και IP που δεν έχει ξαναδοκιμάσει ποτέ.
+await query('delete from login_attempt');
+await query(`insert into login_attempt (key, "failedAttempts", "lockedUntil") values ('__global__', 0, now() + interval '15 minutes')`);
+const globalLocked = await login(CURRENT_PASSWORD, '192.0.2.77');
+check('Το καθολικό δίχτυ κλειδώνει ακόμη και άγνωστη IP', globalLocked.statusCode === 429, `πήρε ${globalLocked.statusCode}`);
+
+await query('delete from login_attempt');
+const recovered = await login(CURRENT_PASSWORD, ATTACKER_IP);
+check('Με τη λήξη του κλειδώματος η σύνδεση ξαναδουλεύει', recovered.statusCode === 200, `πήρε ${recovered.statusCode}`);
 
 // ── Whitelist / injection ──────────────────────────────────────────────
 const badEntity = await data({ entity: 'app_config', op: 'list', args: {} });
@@ -285,6 +331,7 @@ await query('delete from settings');
 await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { where: { description: TEST_TAG } } });
 await data({ entity: 'Settings', op: 'delete', args: { id: setCreate.body?.id } });
 await query('delete from app_config');
+await query('delete from login_attempt');
 
 const leftover = await query(`
   select
