@@ -7,13 +7,8 @@ import ScrollToTop from '@/components/ScrollToTop';
 import { PasswordAuthProvider } from '@/lib/passwordAuth';
 import Gate from '@/components/auth/Gate';
 import Layout from '@/components/Layout';
-import Home from '@/pages/Home';
-import PersonLedger from '@/pages/PersonLedger';
-import BotanicosLedger from '@/pages/BotanicosLedger';
-import MonthlyClose from '@/pages/MonthlyClose';
-import Settlements from '@/pages/Settlements';
-import BotanicosSettlements from '@/pages/BotanicosSettlements';
-import SettingsPage from '@/pages/SettingsPage';
+import Treasury from '@/pages/Treasury';
+import Close from '@/pages/Close';
 import ResetPassword from '@/pages/ResetPassword';
 
 function App() {
@@ -28,13 +23,8 @@ function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<Gate />}>
               <Route element={<Layout />}>
-                <Route path="/" element={<Home />} />
-                <Route path="/ledger/person" element={<PersonLedger />} />
-                <Route path="/ledger/botanicos" element={<BotanicosLedger />} />
-                <Route path="/monthly-close" element={<MonthlyClose />} />
-                <Route path="/settlements" element={<Settlements />} />
-                <Route path="/botanicos-settlements" element={<BotanicosSettlements />} />
-                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/" element={<Treasury />} />
+                <Route path="/close" element={<Close />} />
               </Route>
             </Route>
             <Route path="*" element={<PageNotFound />} />

@@ -1,19 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { LogOut } from 'lucide-react';
 import { getSettings } from '@/lib/api';
 import { round2 } from '@shared/finance';
 import { usePasswordAuth } from '@/lib/passwordAuth';
-import PageHeader from '@/components/PageHeader';
 import { db } from '@/api/client';
 
-export default function SettingsPage() {
+export default function SettingsModal({ open, onOpenChange }) {
   const { toast } = useToast();
-  const { recoveryEmail, updatePassword } = usePasswordAuth();
-  const [settings, setSettings] = useState(null);
+  const { recoveryEmail, updatePassword, logout } = usePasswordAuth();
   const [reserve, setReserve] = useState('');
   const [currentPwd, setCurrentPwd] = useState('');
   const [pwd, setPwd] = useState('');
@@ -21,12 +20,9 @@ export default function SettingsPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      const s = await getSettings();
-      setSettings(s);
-      setReserve(String(s.targetReserve ?? ''));
-    })();
-  }, []);
+    if (!open) return;
+    getSettings().then((s) => setReserve(String(s.targetReserve ?? '')));
+  }, [open]);
 
   useEffect(() => {
     if (recoveryEmail) setEmail(recoveryEmail);
@@ -35,9 +31,8 @@ export default function SettingsPage() {
   const saveReserve = async () => {
     setBusy(true);
     try {
-      const updated = await getSettings();
-      const s = await db.entities.Settings.update(updated.id, { targetReserve: round2(parseFloat(reserve) || 0) });
-      setSettings(s);
+      const s = await getSettings();
+      await db.entities.Settings.update(s.id, { targetReserve: round2(parseFloat(reserve) || 0) });
       toast({ title: 'Ο στόχος αποθηκεύτηκε' });
     } catch (err) {
       toast({ title: err.message || 'Η αποθήκευση απέτυχε', variant: 'destructive' });
@@ -58,23 +53,23 @@ export default function SettingsPage() {
   };
 
   return (
-    <div>
-      <PageHeader title="Ρυθμίσεις" subtitle="Στόχος-απόθεμα, κωδικός & email ανάκτησης" />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="border-stone-200">
-          <CardHeader><CardTitle className="text-base">Στόχος-απόθεμα</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-1.5">
-              <Label>Ποσό στόχου (€)</Label>
-              <Input type="number" step="0.01" value={reserve} onChange={(e) => setReserve(e.target.value)} />
-            </div>
-            <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy} onClick={saveReserve}>Αποθήκευση</Button>
-          </CardContent>
-        </Card>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Ρυθμίσεις</DialogTitle>
+        </DialogHeader>
 
-        <Card className="border-stone-200">
-          <CardHeader><CardTitle className="text-base">Κωδικός & email ανάκτησης</CardTitle></CardHeader>
-          <CardContent className="space-y-4">
+        <div className="space-y-6 pt-1">
+          <div className="space-y-2">
+            <Label>Στόχος-απόθεμα (€)</Label>
+            <div className="flex gap-2">
+              <Input type="number" step="0.01" value={reserve} onChange={(e) => setReserve(e.target.value)} />
+              <Button className="bg-emerald-700 hover:bg-emerald-800 shrink-0" disabled={busy} onClick={saveReserve}>Αποθήκευση</Button>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-t border-stone-200 pt-5">
+            <div className="text-sm font-medium text-stone-700">Κωδικός και email ανάκτησης</div>
             <div className="space-y-1.5">
               <Label>Τρέχων κωδικός</Label>
               <Input type="password" value={currentPwd} onChange={(e) => setCurrentPwd(e.target.value)} autoComplete="current-password" />
@@ -87,10 +82,18 @@ export default function SettingsPage() {
               <Label>Email ανάκτησης</Label>
               <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
-            <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy || !pwd || !currentPwd} onClick={savePassword}>Ενημέρωση κωδικού</Button>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+            <Button className="w-full bg-emerald-700 hover:bg-emerald-800" disabled={busy || !pwd || !currentPwd} onClick={savePassword}>
+              Ενημέρωση κωδικού
+            </Button>
+          </div>
+
+          <div className="border-t border-stone-200 pt-4">
+            <Button variant="ghost" className="w-full text-stone-600" onClick={() => logout()}>
+              <LogOut size={16} className="mr-2" /> Έξοδος
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
