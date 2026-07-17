@@ -91,11 +91,28 @@ export default function MonthlyClose() {
             <div className="space-y-1.5">
               <Label>Πραγματικό μετρημένο υπόλοιπο (€)</Label>
               <Input type="number" step="0.01" value={entered} onChange={(e) => setEntered(e.target.value)} placeholder="0.00" autoFocus />
+              <p className="text-xs text-stone-400">Όσα μετράς στο κουτί αυτή τη στιγμή.</p>
             </div>
-            <div className="text-sm text-stone-500 space-y-1 pt-2 border-t border-stone-100">
+
+            {/* Η αλυσίδα από το μετρημένο ώς το «λείπουν». Χωρίς αυτήν, το τελικό
+                νούμερο δεν εξηγείται: το μετρημένο ΔΕΝ είναι η πραγματική θέση
+                του ταμείου όσο εκκρεμούν οφειλές. */}
+            <div className="text-sm space-y-1.5 pt-3 border-t border-stone-100">
+              <Row label="Μετρημένο υπόλοιπο" value={fmt(enteredNum)} />
+
+              {botanicosBal !== 0 && (
+                <Adjustment
+                  label={botanicosInfo.negative ? 'Ο Βοτανικός σού χρωστάει — θα μπουν' : 'Χρωστάς στον Βοτανικό — θα βγουν'}
+                  delta={-botanicosBal}
+                />
+              )}
+              {manosOwed !== 0 && <Adjustment label={manosBefore.label} delta={-manosOwed} />}
+              {eiriniOwed !== 0 && <Adjustment label={eiriniBefore.label} delta={-eiriniOwed} />}
+
+              <div className="pt-1.5 border-t border-stone-200">
+                <Row label="Πραγματικό υπόλοιπο" value={fmt(calc.enteredBalance)} strong />
+              </div>
               <Row label="Στόχος-απόθεμα" value={fmt(settings.targetReserve)} />
-              <Row label={`${manosBefore.label} (πριν)`} value={fmt(manosBefore.amount)} />
-              <Row label={`${eiriniBefore.label} (πριν)`} value={fmt(eiriniBefore.amount)} />
             </div>
           </CardContent>
         </Card>
@@ -103,16 +120,8 @@ export default function MonthlyClose() {
         <Card className="border-stone-200">
           <CardHeader><CardTitle className="text-base">Υπολογισμός</CardTitle></CardHeader>
           <CardContent className="space-y-3 text-sm">
-            {/* Το «πραγματικό υπόλοιπο» είναι το μετρημένο μείον ό,τι χρωστάει το
-                ταμείο — αυτό συγκρίνεται με τον στόχο, όχι τα σκέτα μετρητά. */}
-            {enteredNum !== 0 && calc.enteredBalance !== enteredNum && (
-              <Row label="Πραγματικό υπόλοιπο (μείον οφειλές)" value={fmt(calc.enteredBalance)} />
-            )}
             <Row label="Λείπουν (στόχος − πραγματικό)" value={fmt(calc.refillAmount)} strong />
             <Row label="Μερίδιο ανά άτομο" value={fmt(calc.shareEach)} strong />
-            {botanicosBal !== 0 && (
-              <div className="text-xs text-stone-400">Διακανονισμός Βοτανικού {fmt(botanicosBal)} · υπόλοιπο μετά μεταφορά: {fmt(effectiveBalance)}</div>
-            )}
             <div className="pt-3 border-t border-stone-100 space-y-3">
               <PersonResult
                 party="manos"
@@ -180,6 +189,20 @@ function Row({ label, value, strong }) {
     <div className="flex justify-between">
       <span className="text-stone-500">{label}</span>
       <span className={`tabular-nums ${strong ? 'font-semibold text-stone-900' : 'text-stone-700'}`}>{value}</span>
+    </div>
+  );
+}
+
+// Γραμμή προσαρμογής: δείχνει ΠΟΣΟ και ΠΡΟΣ ΤΑ ΠΟΥ κινεί το υπόλοιπο μια
+// εκκρεμής οφειλή, με ρητό πρόσημο ώστε η αλυσίδα να διαβάζεται σαν πρόσθεση.
+function Adjustment({ label, delta }) {
+  const positive = delta > 0;
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-stone-500 leading-tight">{label}</span>
+      <span className={`tabular-nums whitespace-nowrap ${positive ? 'text-emerald-700' : 'text-rose-600'}`}>
+        {positive ? '+' : '−'}{fmt(Math.abs(delta))}
+      </span>
     </div>
   );
 }
