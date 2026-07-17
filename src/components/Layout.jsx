@@ -13,10 +13,10 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900">
-      {/* Δύο μόνο καρτέλες — top nav αντί για sidebar. Χωράει άνετα και σε
-          στενή οθόνη, οπότε δεν χρειάζεται πια συρτάρι. */}
-      <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-stone-200">
-        <div className="max-w-5xl mx-auto flex items-center gap-3 h-14 px-4 lg:px-6">
+      <div className="max-w-5xl mx-auto px-5 lg:px-6 py-6 lg:py-8">
+        {/* Η πλοήγηση κάθεται μέσα στο περιεχόμενο, ευθυγραμμισμένη με τις
+            κάρτες — όχι σε μπάρα πλήρους πλάτους στην κορυφή. */}
+        <div className="flex items-center gap-3 mb-6 pb-4 border-b border-stone-200">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-md bg-emerald-700 flex items-center justify-center">
               <Wallet className="text-white" size={15} />
@@ -24,7 +24,7 @@ export default function Layout() {
             <span className="font-semibold tracking-tight text-sm hidden sm:inline">Κοινό Ταμείο</span>
           </div>
 
-          <nav className="flex items-center gap-1 ml-2">
+          <nav className="flex items-center gap-1 ml-1">
             {TABS.map(({ to, label }) => (
               <NavLink
                 key={to}
@@ -52,11 +52,9 @@ export default function Layout() {
             <SettingsIcon size={19} />
           </button>
         </div>
-      </header>
 
-      <main className="px-5 py-6 lg:px-6 lg:py-8 max-w-5xl mx-auto">
         <Outlet />
-      </main>
+      </div>
 
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
