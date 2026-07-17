@@ -14,6 +14,7 @@ import MonthlyClose from '@/pages/MonthlyClose';
 import Settlements from '@/pages/Settlements';
 import BotanicosSettlements from '@/pages/BotanicosSettlements';
 import SettingsPage from '@/pages/SettingsPage';
+import ResetPassword from '@/pages/ResetPassword';
 
 function App() {
   return (
@@ -22,6 +23,9 @@ function App() {
         <Router>
           <ScrollToTop />
           <Routes>
+            {/* Εκτός του Gate: ο χρήστης φτάνει εδώ ακριβώς επειδή δεν μπορεί
+                να συνδεθεί. */}
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<Gate />}>
               <Route element={<Layout />}>
                 <Route path="/" element={<Home />} />

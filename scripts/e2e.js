@@ -143,26 +143,117 @@ await query('delete from login_attempt');
 await login('λάθος', OWNER_IP);
 await login('λάθος', OWNER_IP);
 await login(CURRENT_PASSWORD, OWNER_IP);
-const afterSuccess = await query('select * from login_attempt where key = $1', [OWNER_IP]);
+const afterSuccess = await query('select * from login_attempt where key = $1', [`login:${OWNER_IP}`]);
 check('Η επιτυχής σύνδεση μηδενίζει τον μετρητή', afterSuccess.rows.length === 0, `έμειναν ${afterSuccess.rows.length}`);
 
 // Σκόρπιες αποτυχίες σε βάθος χρόνου δεν πρέπει να συσσωρεύονται σε κλείδωμα.
 await query('delete from login_attempt');
-await query(`insert into login_attempt (key, "failedAttempts", updated_date) values ($1, 4, now() - interval '20 minutes')`, [OWNER_IP]);
+await query(`insert into login_attempt (key, "failedAttempts", updated_date) values ($1, 4, now() - interval '20 minutes')`, [`login:${OWNER_IP}`]);
 await login('λάθος', OWNER_IP);
-const windowed = await query('select "failedAttempts", "lockedUntil" from login_attempt where key = $1', [OWNER_IP]);
+const windowed = await query('select "failedAttempts", "lockedUntil" from login_attempt where key = $1', [`login:${OWNER_IP}`]);
 check('Αποτυχίες εκτός παραθύρου 15 λεπτών δεν συσσωρεύονται',
   windowed.rows[0]?.failedAttempts === 1 && !windowed.rows[0]?.lockedUntil, JSON.stringify(windowed.rows[0]));
 
 // Το καθολικό δίχτυ πιάνει και IP που δεν έχει ξαναδοκιμάσει ποτέ.
 await query('delete from login_attempt');
-await query(`insert into login_attempt (key, "failedAttempts", "lockedUntil") values ('__global__', 0, now() + interval '15 minutes')`);
+await query(`insert into login_attempt (key, "failedAttempts", "lockedUntil") values ('login:__global__', 0, now() + interval '15 minutes')`);
 const globalLocked = await login(CURRENT_PASSWORD, '192.0.2.77');
 check('Το καθολικό δίχτυ κλειδώνει ακόμη και άγνωστη IP', globalLocked.statusCode === 429, `πήρε ${globalLocked.statusCode}`);
 
 await query('delete from login_attempt');
 const recovered = await login(CURRENT_PASSWORD, ATTACKER_IP);
 check('Με τη λήξη του κλειδώματος η σύνδεση ξαναδουλεύει', recovered.statusCode === 200, `πήρε ${recovered.statusCode}`);
+
+// ── Επαναφορά κωδικού ──────────────────────────────────────────────────
+// Δεν στέλνουμε αληθινά email: υποκλέπτουμε το fetch προς το Resend και
+// κρατάμε το σώμα του αιτήματος, ώστε να ελέγξουμε και το περιεχόμενο.
+const sentEmails = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, opts) => {
+  if (String(url).includes('api.resend.com')) {
+    sentEmails.push(JSON.parse(opts.body));
+    return new Response(JSON.stringify({ id: 'test' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }
+  return realFetch(url, opts);
+};
+process.env.RESEND_API_KEY = process.env.RESEND_API_KEY || 'test_key';
+
+await query('delete from login_attempt');
+await query('delete from password_reset');
+const RESET_IP = '198.51.100.77';
+const resetReq = (ip = RESET_IP) => auth({ op: 'requestReset' }, { withCookie: false, ip });
+
+const statusReset = await auth({ op: 'status' }, { withCookie: false });
+check('Το status λέει ότι η επαναφορά είναι δυνατή', statusReset.body?.canReset === true, JSON.stringify(statusReset.body));
+check('Το status δεν αποκαλύπτει το email σε ανώνυμο', !('recoveryEmail' in (statusReset.body || {})));
+
+const req1 = await resetReq();
+check('Το αίτημα επαναφοράς πετυχαίνει', req1.statusCode === 200 && req1.body?.sent === true, JSON.stringify(req1.body));
+check('Στάλθηκε ακριβώς ένα email', sentEmails.length === 1, `στάλθηκαν ${sentEmails.length}`);
+check('Το email πήγε στο σωστό παραλήπτη', sentEmails[0]?.to?.[0] === 'a@b.gr', JSON.stringify(sentEmails[0]?.to));
+
+const link = sentEmails[0]?.text?.match(/https?:\/\/\S+/)?.[0] || '';
+const resetToken = new URL(link).searchParams.get('token');
+check('Το email περιέχει σύνδεσμο με token', Boolean(resetToken) && resetToken.length > 20, link);
+check('Ο σύνδεσμος δείχνει σε σταθερό domain, όχι στο Host header', link.startsWith('https://tameio2-app.vercel.app/reset-password'), link);
+check('Το email ΔΕΝ περιέχει τον κωδικό', !sentEmails[0]?.text?.includes(CURRENT_PASSWORD) && !sentEmails[0]?.html?.includes(CURRENT_PASSWORD));
+
+const storedRaw = await query('select "tokenHash" from password_reset');
+check('Στη βάση αποθηκεύεται hash, όχι το ίδιο το token',
+  storedRaw.rows[0]?.tokenHash !== resetToken && storedRaw.rows[0]?.tokenHash?.length === 64,
+  storedRaw.rows[0]?.tokenHash);
+
+const verifyOk = await auth({ op: 'verifyResetToken', args: { token: resetToken } }, { withCookie: false });
+check('Το έγκυρο token επαληθεύεται', verifyOk.body?.valid === true);
+const verifyBad = await auth({ op: 'verifyResetToken', args: { token: 'σκουπίδι' } }, { withCookie: false });
+check('Άκυρο token απορρίπτεται στην επαλήθευση', verifyBad.body?.valid === false);
+
+// Νέο αίτημα ακυρώνει το προηγούμενο token — ένα ενεργό κάθε φορά.
+await resetReq();
+const oldTokenVerify = await auth({ op: 'verifyResetToken', args: { token: resetToken } }, { withCookie: false });
+check('Νέο αίτημα ακυρώνει το προηγούμενο token', oldTokenVerify.body?.valid === false);
+const token2 = new URL(sentEmails[1].text.match(/https?:\/\/\S+/)[0]).searchParams.get('token');
+
+const shortPw = await auth({ op: 'resetPassword', args: { token: token2, password: 'ab' } }, { withCookie: false });
+check('Η επαναφορά απορρίπτει κοντό κωδικό', shortPw.statusCode === 400, `πήρε ${shortPw.statusCode}`);
+
+const RESET_PASSWORD = 'reset-κωδικός-9';
+const doReset = await auth({ op: 'resetPassword', args: { token: token2, password: RESET_PASSWORD } }, { withCookie: false });
+check('Η επαναφορά πετυχαίνει', doReset.statusCode === 200, JSON.stringify(doReset.body));
+check('Η επαναφορά συνδέει τον χρήστη', Boolean(doReset.headers['Set-Cookie']));
+
+const reuse = await auth({ op: 'resetPassword', args: { token: token2, password: 'άλλος-κωδικός' } }, { withCookie: false });
+check('Το token δεν ξαναχρησιμοποιείται', reuse.statusCode === 400, `πήρε ${reuse.statusCode}`);
+
+const loginNewPw = await login(RESET_PASSWORD, RESET_IP);
+check('Ο νέος κωδικός δουλεύει μετά την επαναφορά', loginNewPw.statusCode === 200, `πήρε ${loginNewPw.statusCode}`);
+const loginOldPw = await login(CURRENT_PASSWORD, RESET_IP);
+check('Ο παλιός κωδικός δεν δουλεύει πια', loginOldPw.statusCode === 401, `πήρε ${loginOldPw.statusCode}`);
+
+// Ληγμένο token
+await query('delete from password_reset');
+await resetReq();
+const token3 = new URL(sentEmails[sentEmails.length - 1].text.match(/https?:\/\/\S+/)[0]).searchParams.get('token');
+await query(`update password_reset set "expiresAt" = now() - interval '1 minute'`);
+const expired = await auth({ op: 'resetPassword', args: { token: token3, password: 'κάτι-νέο-123' } }, { withCookie: false });
+check('Ληγμένο token απορρίπτεται', expired.statusCode === 400, `πήρε ${expired.statusCode}`);
+
+// Το rate limit της επαναφοράς ΔΕΝ πρέπει να κλειδώνει το login.
+await query('delete from login_attempt');
+await query('delete from password_reset');
+const FLOOD_IP = '203.0.113.55';
+for (let i = 0; i < 6; i++) await resetReq(FLOOD_IP);
+const flooded = await resetReq(FLOOD_IP);
+check('Πολλά αιτήματα επαναφοράς κλειδώνονται (anti inbox-bombing)', flooded.statusCode === 429, `πήρε ${flooded.statusCode}`);
+const loginStillOk = await login(RESET_PASSWORD, FLOOD_IP);
+check('Το κλείδωμα επαναφοράς ΔΕΝ κλειδώνει το login', loginStillOk.statusCode === 200, `πήρε ${loginStillOk.statusCode}`);
+
+// Επαναφορά της κατάστασης για τους επόμενους ελέγχους.
+globalThis.fetch = realFetch;
+await query('delete from login_attempt');
+await query('delete from password_reset');
+await auth({ op: 'login', args: { password: RESET_PASSWORD } }, { withCookie: false });
+await auth({ op: 'updatePassword', args: { currentPassword: RESET_PASSWORD, password: CURRENT_PASSWORD, recoveryEmail: 'a@b.gr' } });
 
 // ── Whitelist / injection ──────────────────────────────────────────────
 const badEntity = await data({ entity: 'app_config', op: 'list', args: {} });
@@ -332,6 +423,7 @@ await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { where: { descripti
 await data({ entity: 'Settings', op: 'delete', args: { id: setCreate.body?.id } });
 await query('delete from app_config');
 await query('delete from login_attempt');
+await query('delete from password_reset');
 
 const leftover = await query(`
   select

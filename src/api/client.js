@@ -75,6 +75,9 @@ export const auth = {
   logout: () => rpc('/api/auth', { op: 'logout' }),
   updatePassword: (currentPassword, password, recoveryEmail) =>
     rpc('/api/auth', { op: 'updatePassword', args: { currentPassword, password, recoveryEmail } }),
+  requestReset: () => rpc('/api/auth', { op: 'requestReset' }),
+  verifyResetToken: (token) => rpc('/api/auth', { op: 'verifyResetToken', args: { token } }),
+  resetPassword: (token, password) => rpc('/api/auth', { op: 'resetPassword', args: { token, password } }),
 };
 
 export default db;

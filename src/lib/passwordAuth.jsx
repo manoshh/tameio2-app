@@ -6,7 +6,7 @@ import { auth } from '@/api/client';
 const AuthContext = createContext(null);
 
 export function PasswordAuthProvider({ children }) {
-  const [state, setState] = useState({ initialized: false, authed: false, recoveryEmail: '' });
+  const [state, setState] = useState({ initialized: false, authed: false, canReset: false, recoveryEmail: '' });
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -17,7 +17,7 @@ export function PasswordAuthProvider({ children }) {
 
   useEffect(() => {
     refresh()
-      .catch(() => setState({ initialized: false, authed: false }))
+      .catch(() => setState({ initialized: false, authed: false, canReset: false, recoveryEmail: '' }))
       .finally(() => setLoading(false));
   }, [refresh]);
 
@@ -46,6 +46,7 @@ export function PasswordAuthProvider({ children }) {
       value={{
         authed: state.authed,
         initialized: state.initialized,
+        canReset: state.canReset ?? false,
         recoveryEmail: state.recoveryEmail ?? '',
         loading,
         setup,

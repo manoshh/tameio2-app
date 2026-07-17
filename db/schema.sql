@@ -14,6 +14,19 @@ create table if not exists app_config (
   updated_date  timestamptz not null default now()
 );
 
+-- Σύνδεσμοι επαναφοράς κωδικού.
+-- Αποθηκεύεται μόνο το hash του token: αν διαρρεύσει η βάση, τα ενεργά tokens
+-- δεν είναι εξαργυρώσιμα — ίδια λογική με τον κωδικό.
+create table if not exists password_reset (
+  id          uuid primary key default gen_random_uuid(),
+  "tokenHash" text not null unique,
+  "expiresAt" timestamptz not null,
+  "usedAt"    timestamptz,
+  created_date timestamptz not null default now()
+);
+
+create index if not exists password_reset_expires_idx on password_reset ("expiresAt");
+
 -- Μετρητής αποτυχημένων προσπαθειών σύνδεσης, για rate limiting.
 -- key = η IP του επισκέπτη, ή '__global__' για το καθολικό δίχτυ ασφαλείας.
 create table if not exists login_attempt (
