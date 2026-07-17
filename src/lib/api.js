@@ -2,15 +2,13 @@
 import { round2 } from '@shared/finance';
 import { db } from '@/api/client';
 
+// Μία γραμμή ρυθμίσεων. Ταξινόμηση κατά created_date ΑΥΞΟΥΣΑ ώστε να διαβάζεται
+// η ίδια γραμμή με τον server (`loadSettings` στο api/settlements.js): αν ποτέ
+// υπάρξουν δύο, client και server πρέπει να συμφωνούν ποια μετράει.
 export async function getSettings() {
-  const items = await db.entities.Settings.list('-created_date', 10);
+  const items = await db.entities.Settings.list('created_date', 1);
   if (items[0]) return items[0];
-  return await db.entities.Settings.create({
-    targetReserve: 0,
-    manosOwed: 0,
-    eiriniOwed: 0,
-    botanicosBalance: 0,
-  });
+  return await db.entities.Settings.create({ targetReserve: 0 });
 }
 
 export async function listEntries(module) {

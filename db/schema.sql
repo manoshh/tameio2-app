@@ -38,15 +38,23 @@ create table if not exists login_attempt (
 
 create index if not exists login_attempt_updated_idx on login_attempt (updated_date);
 
+-- Ρυθμίσεις της εφαρμογής. Μία γραμμή.
+--
+-- Κρατάει ΜΟΝΟ πραγματικές ρυθμίσεις. Τα υπόλοιπα (τι χρωστάει ο καθένας, τι ο
+-- Βοτανικός) ΔΕΝ αποθηκεύονται: προκύπτουν πάντα από το άθροισμα των ενεργών
+-- εγγραφών (`sumActive`). Μία αλήθεια, καμία πιθανότητα διαφωνίας.
 create table if not exists settings (
   id                 uuid primary key default gen_random_uuid(),
   "targetReserve"    numeric(12,2) not null default 0,
-  "manosOwed"        numeric(12,2) not null default 0,
-  "eiriniOwed"       numeric(12,2) not null default 0,
-  "botanicosBalance" numeric(12,2) not null default 0,
   created_date       timestamptz not null default now(),
   updated_date       timestamptz not null default now()
 );
+
+-- Καθαρισμός βάσεων που φτιάχτηκαν πριν την αφαίρεση. Οι στήλες γράφονταν σε
+-- κάθε εγγραφή αλλά δεν τις διάβαζε ποτέ κανείς — ούτε το UI, ούτε ο server.
+alter table settings drop column if exists "manosOwed";
+alter table settings drop column if exists "eiriniOwed";
+alter table settings drop column if exists "botanicosBalance";
 
 create table if not exists settlement (
   id                      uuid primary key default gen_random_uuid(),

@@ -9,8 +9,8 @@ const AUDIT_COLUMNS = ['id', 'created_date', 'updated_date'];
 export const ENTITIES = {
   Settings: {
     table: 'settings',
-    columns: ['targetReserve', 'manosOwed', 'eiriniOwed', 'botanicosBalance'],
-    numeric: ['targetReserve', 'manosOwed', 'eiriniOwed', 'botanicosBalance'],
+    columns: ['targetReserve'],
+    numeric: ['targetReserve'],
     defaultSort: '-created_date',
   },
   LedgerEntry: {

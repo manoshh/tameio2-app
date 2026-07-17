@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { listEntries, getSettings, fmt } from '@/lib/api';
-import { round2, sumActive } from '@shared/finance';
+import { sumActive } from '@shared/finance';
 import EntryForm from './EntryForm';
 import EntryList from './EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -36,14 +36,11 @@ export default function LedgerModule({ module }) {
   const botanicosBal = sumActive(entries, () => true);
   const active = entries.filter((e) => !e.settlementId);
 
+  // Τα υπόλοιπα προκύπτουν από τις εγγραφές (δες `sumActive` παραπάνω), οπότε η
+  // εγγραφή είναι το μόνο που χρειάζεται να γραφτεί — καμία ξεχωριστή ενημέρωση
+  // υπολοίπου, τίποτα που μπορεί να ξεσυγχρονιστεί.
   const addEntry = async (data) => {
     await db.entities.LedgerEntry.create({ ...data, settlementId: '', carryOverSettlementId: '' });
-    if (isPerson) {
-      const field = data.person === 'manos' ? 'manosOwed' : 'eiriniOwed';
-      await db.entities.Settings.update(settings.id, { [field]: round2((settings[field] || 0) + data.amount) });
-    } else {
-      await db.entities.Settings.update(settings.id, { botanicosBalance: round2((settings.botanicosBalance || 0) + data.amount) });
-    }
     toast({ title: 'Η εγγραφή προστέθηκε' });
     await load();
   };
@@ -52,12 +49,6 @@ export default function LedgerModule({ module }) {
     const entry = pendingDelete;
     setPendingDelete(null);
     if (!entry || entry.settlementId) return;
-    if (isPerson) {
-      const field = entry.person === 'manos' ? 'manosOwed' : 'eiriniOwed';
-      await db.entities.Settings.update(settings.id, { [field]: round2((settings[field] || 0) - entry.amount) });
-    } else {
-      await db.entities.Settings.update(settings.id, { botanicosBalance: round2((settings.botanicosBalance || 0) - entry.amount) });
-    }
     await db.entities.LedgerEntry.delete(entry.id);
     toast({ title: 'Η εγγραφή διαγράφηκε' });
     await load();
@@ -66,11 +57,6 @@ export default function LedgerModule({ module }) {
   const zeroOut = async () => {
     setZeroOpen(false);
     await db.entities.LedgerEntry.deleteMany({ module, settlementId: '' });
-    if (isPerson) {
-      await db.entities.Settings.update(settings.id, { manosOwed: 0, eiriniOwed: 0 });
-    } else {
-      await db.entities.Settings.update(settings.id, { botanicosBalance: 0 });
-    }
     toast({ title: 'Το υπόλοιπο μηδενίστηκε' });
     await load();
   };

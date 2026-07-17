@@ -21,13 +21,11 @@ async function loadEntries(client) {
 }
 
 // Το targetReserve είναι απαραίτητο για το κλείσιμο· αν λείπει η γραμμή
-// ρυθμίσεων, τη δημιουργούμε με μηδενικά όπως κάνει και το frontend.
+// ρυθμίσεων, τη δημιουργούμε με μηδενικό στόχο όπως κάνει και το frontend.
 async function loadSettings(client) {
   const { rows } = await client.query('select * from settings order by created_date asc limit 1');
   if (rows[0]) return deserializeRow(ENTITIES.Settings, rows[0]);
-  const created = await client.query(
-    'insert into settings ("targetReserve", "manosOwed", "eiriniOwed", "botanicosBalance") values (0, 0, 0, 0) returning *'
-  );
+  const created = await client.query('insert into settings ("targetReserve") values (0) returning *');
   return deserializeRow(ENTITIES.Settings, created.rows[0]);
 }
 
@@ -107,12 +105,8 @@ const OPERATIONS = {
         );
       }
 
-      // 5) Ενημέρωση υπολοίπων
-      await client.query(
-        'update settings set "manosOwed" = $1, "eiriniOwed" = $2, "botanicosBalance" = 0, updated_date = now() where id = $3',
-        [calc.manos.owedAfter, calc.eirini.owedAfter, settings.id]
-      );
-
+      // Τα νέα υπόλοιπα δεν χρειάζεται να αποθηκευτούν: προκύπτουν από τις
+      // εγγραφές — οι παλιές αρχειοθετήθηκαν, τα carry-over είναι ό,τι μένει.
       return { settlement, calc };
     });
   },
@@ -125,14 +119,11 @@ const OPERATIONS = {
       const { rows } = await client.query('select * from settlement order by "timestamp" desc limit 1');
       if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει κλείσιμο προς αναίρεση');
       const latest = deserializeRow(ENTITIES.Settlement, rows[0]);
-      const settings = await loadSettings(client);
 
+      // Σβήνουμε τα carry-over και επαναφέρουμε τις αρχειοθετημένες ως ενεργές:
+      // τα υπόλοιπα επανέρχονται μόνα τους, αφού προκύπτουν από τις εγγραφές.
       await client.query('delete from ledger_entry where "carryOverSettlementId" = $1', [latest.id]);
       await client.query('update ledger_entry set "settlementId" = \'\', updated_date = now() where "settlementId" = $1', [latest.id]);
-      await client.query(
-        'update settings set "manosOwed" = $1, "eiriniOwed" = $2, updated_date = now() where id = $3',
-        [latest.manosOwedBefore, latest.eiriniOwedBefore, settings.id]
-      );
       await client.query('delete from settlement where id = $1', [latest.id]);
 
       return { undone: latest.id };
@@ -141,7 +132,6 @@ const OPERATIONS = {
 
   async botanicosSettle() {
     return transaction(async (client) => {
-      const settings = await loadSettings(client);
       const entries = await loadEntries(client);
       const balanceBefore = sumActive(entries, (e) => e.module === 'botanicos');
 
@@ -150,9 +140,9 @@ const OPERATIONS = {
         month: now.getMonth() + 1, year: now.getFullYear(), balanceBefore, timestamp: now.toISOString(),
       });
 
+      // Η αρχειοθέτηση των εγγραφών μηδενίζει από μόνη της το υπόλοιπο.
       const active = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
       await archiveEntries(client, active.map((e) => e.id), bs.id);
-      await client.query('update settings set "botanicosBalance" = 0, updated_date = now() where id = $1', [settings.id]);
 
       return { settlement: bs };
     });
@@ -163,10 +153,8 @@ const OPERATIONS = {
       const { rows } = await client.query('select * from botanicos_settlement order by "timestamp" desc limit 1');
       if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει διακανονισμός προς αναίρεση');
       const latest = deserializeRow(ENTITIES.BotanicosSettlement, rows[0]);
-      const settings = await loadSettings(client);
 
       await client.query('update ledger_entry set "settlementId" = \'\', updated_date = now() where "settlementId" = $1', [latest.id]);
-      await client.query('update settings set "botanicosBalance" = $1, updated_date = now() where id = $2', [latest.balanceBefore, settings.id]);
       await client.query('delete from botanicos_settlement where id = $1', [latest.id]);
 
       return { undone: latest.id };
