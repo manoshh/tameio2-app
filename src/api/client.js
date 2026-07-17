@@ -62,7 +62,10 @@ export const db = {
 // Οι διακανονισμοί δεν περνούν από το generic entity API: ο server τους εκτελεί
 // ως μία ατομική πράξη και υπολογίζει ο ίδιος τα ποσά.
 export const settlements = {
-  close: (enteredBalance) => rpc('/api/settlements', { op: 'close', args: { enteredBalance } }),
+  // `contributions` = πόσα κατέθεσε πράγματι ο καθένας ({ manos, eirini }).
+  // Αν λείπει, ισχύουν τα ποσά που υπολογίζει ο server.
+  close: (enteredBalance, contributions) =>
+    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions } }),
   undoClose: () => rpc('/api/settlements', { op: 'undoClose' }),
   botanicosSettle: () => rpc('/api/settlements', { op: 'botanicosSettle' }),
   undoBotanicos: () => rpc('/api/settlements', { op: 'undoBotanicos' }),

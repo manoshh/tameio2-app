@@ -14,8 +14,20 @@ if (!process.env.DATABASE_URL) {
   throw new Error('Λείπει το DATABASE_URL. Δες το .env.example.');
 }
 
+// Το DB_SCHEMA χρησιμοποιείται ΜΟΝΟ από το `npm run test:e2e`, ώστε οι έλεγχοι
+// να τρέχουν σε απομονωμένο schema της ίδιας βάσης και να μην αγγίζουν ποτέ τα
+// πραγματικά δεδομένα. Στην παραγωγή δεν ορίζεται και ισχύει το public.
+// Το search_path απαιτεί unpooled σύνδεση — ο pooler του Neon το απορρίπτει.
+const schema = process.env.DB_SCHEMA;
+const connectionString = schema
+  ? process.env.DATABASE_URL.replace('-pooler.', '.')
+  : process.env.DATABASE_URL;
+
 // Ένα pool ανά serverless instance, όχι ανά request.
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString,
+  ...(schema ? { options: `-c search_path=${schema}` } : {}),
+});
 
 export function query(text, params) {
   return pool.query(text, params);

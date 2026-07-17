@@ -1,7 +1,7 @@
 import { transaction } from './_lib/db.js';
 import { ENTITIES, deserializeRow, HttpError } from './_lib/entities.js';
 import { requireAuth } from './_lib/session.js';
-import { round2, sumActive, computeMonthlyClose } from '../shared/finance.js';
+import { round2, sumActive, computeMonthlyClose, applyActualContribution } from '../shared/finance.js';
 
 // Οι λειτουργίες διακανονισμού αγγίζουν 4 πίνακες. Ζουν εδώ, και όχι στο
 // /api/data, για δύο λόγους:
@@ -43,10 +43,24 @@ async function createBotanicosSettlement(client, { month, year, balanceBefore, t
 }
 
 const OPERATIONS = {
-  // Κλείσιμο μήνα. Ο client στέλνει ΜΟΝΟ το πραγματικό μετρημένο υπόλοιπο.
-  async close({ enteredBalance }) {
+  // Κλείσιμο μήνα.
+  //
+  // Ο client στέλνει μόνο μετρημένα γεγονότα: το υπόλοιπο του κουτιού και πόσα
+  // κατέθεσε πράγματι ο καθένας. Ποτέ υπολογισμένα ποσά — αυτά τα βγάζει ο
+  // server από τις εγγραφές της βάσης.
+  async close({ enteredBalance, contributions }) {
     const entered = Number(enteredBalance);
     if (!Number.isFinite(entered)) throw new HttpError(400, 'Μη έγκυρο υπόλοιπο');
+
+    // Προαιρετικά· αν λείπουν, ισχύουν τα υπολογισμένα ποσά.
+    const paid = {};
+    for (const person of ['manos', 'eirini']) {
+      const value = contributions?.[person];
+      if (value === undefined || value === null || value === '') continue;
+      const num = Number(value);
+      if (!Number.isFinite(num)) throw new HttpError(400, `Μη έγκυρο ποσό κατάθεσης για ${person}`);
+      paid[person] = num;
+    }
 
     return transaction(async (client) => {
       const settings = await loadSettings(client);
@@ -59,7 +73,15 @@ const OPERATIONS = {
       const eiriniOwed = sumActive(entries, (e) => e.person === 'eirini' && e.module === 'person');
 
       const effectiveBalance = round2(entered - botanicosBalance);
-      const calc = computeMonthlyClose(settings.targetReserve, effectiveBalance, manosOwed, eiriniOwed);
+      const computed = computeMonthlyClose(settings.targetReserve, effectiveBalance, manosOwed, eiriniOwed);
+
+      // Ό,τι κατατέθηκε διαφορετικά από το υπολογισμένο γίνεται υπόλοιπο για τον
+      // επόμενο μήνα — προς τις δύο κατευθύνσεις.
+      const calc = {
+        ...computed,
+        manos: paid.manos !== undefined ? applyActualContribution(computed.manos, paid.manos) : computed.manos,
+        eirini: paid.eirini !== undefined ? applyActualContribution(computed.eirini, paid.eirini) : computed.eirini,
+      };
 
       const now = new Date();
       const month = now.getMonth() + 1;
@@ -94,14 +116,18 @@ const OPERATIONS = {
       const activePerson = entries.filter((e) => e.module === 'person' && !e.settlementId);
       await archiveEntries(client, activePerson.map((e) => e.id), settlement.id);
 
-      // 4) Carry-over για ό,τι μένει οφειλόμενο
+      // 4) Ό,τι μένει ανοιχτό γίνεται ενεργή εγγραφή για τον επόμενο μήνα —
+      //    είτε πίστωση (κατέθεσε παραπάνω) είτε χρέος (κατέθεσε λιγότερα).
       const today = timestamp.slice(0, 10);
       for (const [person, result] of [['manos', calc.manos], ['eirini', calc.eirini]]) {
         if (result.owedAfter === 0) continue;
+        const label = result.owedAfter > 0
+          ? `Πίστωση από κλείσιμο ${month}/${year}`
+          : `Οφειλή από κλείσιμο ${month}/${year}`;
         await client.query(
           `insert into ledger_entry (module, person, amount, description, date, "settlementId", "carryOverSettlementId")
-           values ('person', $1, $2, 'Υπόλοιπο από προηγ. μήνα', $3, '', $4)`,
-          [person, result.owedAfter, today, settlement.id]
+           values ('person', $1, $2, $3, $4, '', $5)`,
+          [person, result.owedAfter, label, today, settlement.id]
         );
       }
 

@@ -1,44 +1,68 @@
 #!/usr/bin/env node
-// Έλεγχος end-to-end των API handlers ενάντια σε πραγματική βάση.
+// Έλεγχος end-to-end των API handlers ενάντια σε πραγματική Postgres.
 // Τρέξε με: npm run test:e2e
 //
-// ⚠ ΚΑΤΑΣΤΡΟΦΙΚΟ: γράφει και σβήνει δεδομένα. Τρέχει ΜΟΝΟ σε άδεια βάση —
-// δες το assertSafeToRun() παρακάτω. Μην το στρέψεις ποτέ σε βάση με
-// πραγματικά δεδομένα.
+// Οι έλεγχοι γράφουν και σβήνουν δεδομένα, οπότε τρέχουν σε ΔΙΚΟ ΤΟΥΣ schema
+// (`e2e_test`) μέσα στην ίδια βάση: το schema φτιάχνεται στην αρχή, καταστρέφεται
+// στο τέλος, και τα πραγματικά δεδομένα στο `public` δεν αγγίζονται ποτέ.
+//
+// Το φρένο του assertSafeToRun() παραμένει ως δεύτερη γραμμή άμυνας, για την
+// περίπτωση που το DB_SCHEMA δεν εφαρμοστεί για οποιονδήποτε λόγο.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { readFile } from 'node:fs/promises';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env.local') });
+
+const TEST_SCHEMA = 'e2e_test';
+process.env.DB_SCHEMA = TEST_SCHEMA;
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'e2e-secret-that-is-long-enough-000000';
+
+// Το schema πρέπει να υπάρχει ΠΡΙΝ φορτωθεί το db.js (το pool συνδέεται με
+// search_path που δείχνει εκεί).
+{
+  const { Pool, neonConfig } = await import('@neondatabase/serverless');
+  const ws = (await import('ws')).default;
+  if (typeof WebSocket === 'undefined') neonConfig.webSocketConstructor = ws;
+  const admin = new Pool({ connectionString: process.env.DATABASE_URL });
+  await admin.query(`drop schema if exists ${TEST_SCHEMA} cascade`);
+  await admin.query(`create schema ${TEST_SCHEMA}`);
+  await admin.end();
+}
 
 const { default: dataHandler } = await import(path.join(root, 'api/data.js'));
 const { default: authHandler } = await import(path.join(root, 'api/auth.js'));
 const { default: settlementsHandler } = await import(path.join(root, 'api/settlements.js'));
 const { query } = await import(path.join(root, 'api/_lib/db.js'));
+const { round2 } = await import(path.join(root, 'shared/finance.js'));
 
 const TEST_PASSWORD = 'test-password-123';
 const TEST_DATE = '2026-07-16';
 const TEST_TAG = '__e2e__';
 
-// Το φρένο: ο έλεγχος σβήνει τον κωδικό και εγγραφές. Αν η βάση περιέχει
-// οτιδήποτε πραγματικό, σταματάμε πριν κάνουμε ζημιά.
+// Δεύτερη γραμμή άμυνας: αν για οποιονδήποτε λόγο δεν βρισκόμαστε στο schema των
+// ελέγχων, σταματάμε πριν αγγίξουμε πραγματικά δεδομένα.
 async function assertSafeToRun() {
-  const { rows } = await query(`
-    select
-      (select count(*) from ledger_entry where description <> '${TEST_TAG}') as entries,
-      (select count(*) from settlement) as settlements,
-      (select count(*) from botanicos_settlement) as botanicos
-  `);
-  const { entries, settlements, botanicos } = rows[0];
-  const total = Number(entries) + Number(settlements) + Number(botanicos);
-  if (total > 0) {
-    console.error('✖ Η βάση περιέχει πραγματικά δεδομένα — ο έλεγχος ΔΕΝ θα τρέξει.');
-    console.error(`  εγγραφές: ${entries}, διακανονισμοί: ${settlements}, βοτανικός: ${botanicos}`);
-    console.error('  Στρέψε το DATABASE_URL σε άδεια βάση (π.χ. Neon branch) και ξαναδοκίμασε.');
+  const { rows } = await query('select current_schema() as schema');
+  if (rows[0].schema !== TEST_SCHEMA) {
+    console.error(`✖ Οι έλεγχοι τρέχουν στο schema "${rows[0].schema}" αντί για "${TEST_SCHEMA}".`);
+    console.error('  Σταματώ: δεν γράφω ποτέ σε πραγματικά δεδομένα.');
     process.exit(1);
   }
+}
+
+// Το schema των ελέγχων ξεκινά άδειο: του εφαρμόζουμε το ίδιο db/schema.sql με
+// την παραγωγή, ώστε να ελέγχουμε το πραγματικό schema και όχι ένα αντίγραφο.
+async function createTables() {
+  const sql = await readFile(path.join(root, 'db', 'schema.sql'), 'utf8');
+  await query(sql);
+}
+
+async function dropTestSchema() {
+  await query(`drop schema if exists ${TEST_SCHEMA} cascade`);
 }
 
 let cookie = null;
@@ -77,8 +101,7 @@ const entry = (over = {}) => ({
 });
 
 await assertSafeToRun();
-await query('delete from app_config');
-await query('delete from login_attempt');
+await createTables();
 
 // ── Auth ───────────────────────────────────────────────────────────────
 const anon = await data({ entity: 'Settings', op: 'list', args: {} });
@@ -321,13 +344,13 @@ const noFilter = await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { w
 check('deleteMany χωρίς φίλτρο απορρίπτεται (όχι μαζική διαγραφή)', noFilter.statusCode === 400, `πήρε ${noFilter.statusCode}`);
 
 // ── Μηνιαίο κλείσιμο ───────────────────────────────────────────────────
-// Σενάριο με αριθμούς υπολογισμένους στο χέρι:
-//   στόχος 1000 | μετρημένο 500 | Μάνος χρωστά 100 | Ειρήνη 50 | Βοτανικός 30
-//   effective = 500 - 30            = 470
-//   refill    = 1000 - 470          = 530
-//   shareEach = 530 / 2             = 265
-//   Μάνος:  offset 100 → συνεισφορά 165, μετά 0
-//   Ειρήνη: offset  50 → συνεισφορά 215, μετά 0
+// Σενάριο με αριθμούς υπολογισμένους στο χέρι, κατά τον κανόνα του χρήστη:
+//   στόχος 1000 | μετρημένο 500 | ταμείο χρωστάει: Μάνο 100, Ειρήνη 50 | Βοτανικός 30
+//   μετά τη μεταφορά Βοτανικού: 500 - 30           = 470
+//   πραγματικό υπόλοιπο:        470 - (100 + 50)   = 320
+//   λείπουν:                    1000 - 320         = 680
+//   μερίδιο:                    680 / 2            = 340
+//   Μάνος:  340 - 100 = 240 · Ειρήνη: 340 - 50 = 290 → μπαίνουν 530 → κουτί 1000 ✓
 await query('delete from ledger_entry');
 await query('delete from settings');
 await data({ entity: 'Settings', op: 'create', args: { data: { targetReserve: 1000 } } });
@@ -346,15 +369,19 @@ const closed = await settle({ op: 'close', args: {
 check('Το κλείσιμο πετυχαίνει', closed.statusCode === 200, JSON.stringify(closed.body));
 
 const s = closed.body?.settlement;
-check('refillAmount υπολογίστηκε στον server (530)', s?.refillAmount === 530, `πήρε ${s?.refillAmount}`);
-check('shareEach υπολογίστηκε στον server (265)', s?.shareEach === 265, `πήρε ${s?.shareEach}`);
+check('Τα χρέη αφαιρούνται ΠΡΙΝ τον υπολογισμό (πραγματικό 320)', s?.enteredBalance === 320, `πήρε ${s?.enteredBalance}`);
+check('refillAmount υπολογίστηκε στον server (680)', s?.refillAmount === 680, `πήρε ${s?.refillAmount}`);
+check('shareEach υπολογίστηκε στον server (340)', s?.shareEach === 340, `πήρε ${s?.shareEach}`);
 check('Αγνοήθηκε το targetReserve του client (1000)', s?.targetReserve === 1000, `πήρε ${s?.targetReserve}`);
-check('enteredBalance = μετρημένο μείον Βοτανικό (470)', s?.enteredBalance === 470, `πήρε ${s?.enteredBalance}`);
 check('Μάνος: offset 100', s?.manosOffset === 100, `πήρε ${s?.manosOffset}`);
-check('Μάνος: συνεισφορά 165', s?.manosContribution === 165, `πήρε ${s?.manosContribution}`);
+check('Μάνος: συνεισφορά 240', s?.manosContribution === 240, `πήρε ${s?.manosContribution}`);
 check('Αγνοήθηκε το manosOwedAfter του client (0)', s?.manosOwedAfter === 0, `πήρε ${s?.manosOwedAfter}`);
-check('Ειρήνη: συνεισφορά 215', s?.eiriniContribution === 215, `πήρε ${s?.eiriniContribution}`);
+check('Ειρήνη: συνεισφορά 290', s?.eiriniContribution === 290, `πήρε ${s?.eiriniContribution}`);
 check('Καταγράφηκε το υπόλοιπο Βοτανικού (30)', s?.botanicosBalanceBefore === 30, `πήρε ${s?.botanicosBalanceBefore}`);
+// Ο πυρήνας του κανόνα: το κουτί πέφτει ΑΚΡΙΒΩΣ στον στόχο.
+check('Το κουτί καταλήγει ακριβώς στον στόχο (1000)',
+  round2(470 + s?.manosContribution + s?.eiriniContribution) === 1000,
+  `πήρε ${round2(470 + s?.manosContribution + s?.eiriniContribution)}`);
 
 const afterClose = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
 check('Όλες οι εγγραφές αρχειοθετήθηκαν', afterClose.every((e) => e.settlementId !== ''), JSON.stringify(afterClose.map((e) => e.settlementId)));
@@ -387,22 +414,64 @@ const manosAfterUndo = personActive
   .reduce((s, e) => s + e.amount, 0);
 check('Το υπόλοιπο του Μάνου επανήλθε στο 100 (από τις εγγραφές)', manosAfterUndo === 100, `πήρε ${manosAfterUndo}`);
 
-// ── Carry-over όταν μένει υπόλοιπο ─────────────────────────────────────
-// στόχος 1000, μετρημένο 990, Μάνος χρωστά 100 → refill 10, share 5
-//   offset = clamp(100, -5, 5) = 5 → μετά = 95 → carry-over 95
+// ── Πιστωτικό μεγαλύτερο από το μερίδιο ────────────────────────────────
+// Το σενάριο που όρισε ο χρήστης: κανείς δεν βγάζει μετρητά· ό,τι περισσεύει
+// μεταφέρεται.
+//   στόχος 1000 | μετρημένο 990 | ταμείο χρωστάει στον Μάνο 100
+//   πραγματικό = 990 - 100 = 890 · λείπουν 110 · μερίδιο 55
+//   Μάνος: offset 55 (όχι 100) → βάζει 0, του μένουν 45 πιστωτικό
+//   Ειρήνη: βάζει 55
+//   μετρητά 990 + 55 = 1045 · ΠΡΑΓΜΑΤΙΚΗ θέση 1045 - 45 = 1000 ✓
 await query('delete from ledger_entry');
 await data({ entity: 'LedgerEntry', op: 'create', args: { data: entry({ person: 'manos', amount: 100 }) } });
 const close2 = await settle({ op: 'close', args: { enteredBalance: 990 } });
 check('2ο κλείσιμο πετυχαίνει', close2.statusCode === 200, JSON.stringify(close2.body));
-check('Μάνος: μένει υπόλοιπο 95', close2.body?.settlement?.manosOwedAfter === 95, `πήρε ${close2.body?.settlement?.manosOwedAfter}`);
+const s2 = close2.body?.settlement;
+check('Το offset δεν ξεπερνά το μερίδιο (55, όχι 100)', s2?.manosOffset === 55, `πήρε ${s2?.manosOffset}`);
+check('Μάνος δεν βγάζει μετρητά (βάζει 0)', s2?.manosContribution === 0, `πήρε ${s2?.manosContribution}`);
+check('Μάνος: μένει πιστωτικό 45', s2?.manosOwedAfter === 45, `πήρε ${s2?.manosOwedAfter}`);
+check('Ειρήνη βάζει 55', s2?.eiriniContribution === 55, `πήρε ${s2?.eiriniContribution}`);
+check('Η ΠΡΑΓΜΑΤΙΚΗ θέση πέφτει στον στόχο (1045 - 45 = 1000)',
+  round2(990 + s2?.manosContribution + s2?.eiriniContribution - s2?.manosOwedAfter) === 1000,
+  `πήρε ${round2(990 + s2?.manosContribution + s2?.eiriniContribution - s2?.manosOwedAfter)}`);
 
-const carry = (await data({ entity: 'LedgerEntry', op: 'filter', args: { where: { carryOverSettlementId: close2.body?.settlement?.id } } })).body;
-check('Δημιουργήθηκε εγγραφή carry-over', carry.length === 1, `βρέθηκαν ${carry.length}`);
-check('Το carry-over έχει ποσό 95 και είναι ενεργό', carry[0]?.amount === 95 && carry[0]?.settlementId === '', JSON.stringify(carry[0]));
+const carry = (await data({ entity: 'LedgerEntry', op: 'filter', args: { where: { carryOverSettlementId: s2?.id } } })).body;
+check('Δημιουργήθηκε εγγραφή μεταφοράς', carry.length === 1, `βρέθηκαν ${carry.length}`);
+check('Η μεταφορά έχει ποσό 45 και είναι ενεργή', carry[0]?.amount === 45 && carry[0]?.settlementId === '', JSON.stringify(carry[0]));
+check('Η μεταφορά περιγράφεται ως πίστωση', /Πίστωση/.test(carry[0]?.description || ''), carry[0]?.description);
 
 const undo2 = await settle({ op: 'undoClose' });
-check('Η αναίρεση σβήνει το carry-over', undo2.statusCode === 200 &&
+check('Η αναίρεση σβήνει τη μεταφορά', undo2.statusCode === 200 &&
   (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body.length === 1);
+
+// ── Χειροκίνητο ποσό κατάθεσης ─────────────────────────────────────────
+// στόχος 1000, μετρημένο 500, Μάνος χρωστάει 100 (amount -100)
+//   πραγματικό = 500 + 100 = 600 · λείπουν 400 · μερίδιο 200
+//   Μάνος: 200 + 100 = 300 · Ειρήνη: 200
+await query('delete from ledger_entry');
+await data({ entity: 'LedgerEntry', op: 'create', args: { data: entry({ person: 'manos', amount: -100 }) } });
+
+// (α) Καταθέτει ΠΑΡΑΠΑΝΩ (στρογγυλοποίηση 300 → 320): πίστωση 20.
+const over = await settle({ op: 'close', args: { enteredBalance: 500, contributions: { manos: 320, eirini: 200 } } });
+check('Κατάθεση μεγαλύτερη από το υπολογισμένο γίνεται δεκτή', over.statusCode === 200, JSON.stringify(over.body));
+check('Καταγράφηκε το πραγματικό ποσό (320)', over.body?.settlement?.manosContribution === 320, `πήρε ${over.body?.settlement?.manosContribution}`);
+check('Η διαφορά έγινε πίστωση (+20)', over.body?.settlement?.manosOwedAfter === 20, `πήρε ${over.body?.settlement?.manosOwedAfter}`);
+const overCarry = (await data({ entity: 'LedgerEntry', op: 'filter', args: { where: { carryOverSettlementId: over.body?.settlement?.id } } })).body;
+check('Η πίστωση έγινε ξεχωριστή εγγραφή (+20)', overCarry.length === 1 && overCarry[0]?.amount === 20, JSON.stringify(overCarry));
+await settle({ op: 'undoClose' });
+
+// (β) Καταθέτει ΛΙΓΟΤΕΡΑ (δεν έχει να πληρώσει): χρέος για τον επόμενο μήνα.
+const under = await settle({ op: 'close', args: { enteredBalance: 500, contributions: { manos: 0, eirini: 200 } } });
+check('Κατάθεση 0 γίνεται δεκτή (δεν έχει να πληρώσει)', under.statusCode === 200, JSON.stringify(under.body));
+check('Όλο το ποσό έγινε χρέος (-300)', under.body?.settlement?.manosOwedAfter === -300, `πήρε ${under.body?.settlement?.manosOwedAfter}`);
+const underCarry = (await data({ entity: 'LedgerEntry', op: 'filter', args: { where: { carryOverSettlementId: under.body?.settlement?.id } } })).body;
+check('Το χρέος έγινε ξεχωριστή εγγραφή (-300)', underCarry.length === 1 && underCarry[0]?.amount === -300, JSON.stringify(underCarry));
+check('Το χρέος περιγράφεται ως οφειλή', /Οφειλή/.test(underCarry[0]?.description || ''), underCarry[0]?.description);
+// Το ισοζύγιο κλείνει όσα κι αν κατατεθούν: μετρητά 500+0+200=700, χρέος 300 → 1000.
+check('Η ΠΡΑΓΜΑΤΙΚΗ θέση πέφτει στον στόχο ακόμη και με μηδενική κατάθεση',
+  round2(500 + 0 + 200 - under.body?.settlement?.manosOwedAfter) === 1000,
+  `πήρε ${round2(500 + 0 + 200 - under.body?.settlement?.manosOwedAfter)}`);
+await settle({ op: 'undoClose' });
 
 // ── Διακανονισμός Βοτανικού μεμονωμένα ─────────────────────────────────
 await query('delete from ledger_entry');
@@ -428,21 +497,9 @@ await query('delete from settlement');
 await query('delete from settings');
 
 // ── Καθαρισμός ─────────────────────────────────────────────────────────
-await data({ entity: 'LedgerEntry', op: 'deleteMany', args: { where: { description: TEST_TAG } } });
-await data({ entity: 'Settings', op: 'delete', args: { id: setCreate.body?.id } });
-await query('delete from app_config');
-await query('delete from login_attempt');
-await query('delete from password_reset');
-
-const leftover = await query(`
-  select
-    (select count(*) from ledger_entry) as entries,
-    (select count(*) from settings) as settings,
-    (select count(*) from app_config) as config
-`);
-const l = leftover.rows[0];
-check('Η βάση επανήλθε καθαρή', Number(l.entries) + Number(l.settings) + Number(l.config) === 0,
-  `εγγραφές ${l.entries}, settings ${l.settings}, config ${l.config}`);
+// Ολόκληρο το schema των ελέγχων εξαφανίζεται· τα πραγματικά δεδομένα στο
+// `public` δεν αγγίχθηκαν ποτέ.
+await dropTestSchema();
 
 // ── Σύνοψη ─────────────────────────────────────────────────────────────
 const failed = results.filter((r) => !r.ok);
