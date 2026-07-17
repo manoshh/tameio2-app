@@ -6,18 +6,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Plus } from 'lucide-react';
 import { directionOptions } from '@/lib/labels';
 
-export default function EntryForm({ module, onAdd }) {
+export default function EntryForm({ module, person: fixedPerson, onAdd }) {
   const today = new Date().toISOString().slice(0, 10);
   const [amount, setAmount] = useState('');
   const [direction, setDirection] = useState('paid_in');
-  const [person, setPerson] = useState('manos');
+  const [ownPerson, setOwnPerson] = useState('manos');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(today);
   const [touched, setTouched] = useState(false);
 
   const isPerson = module === 'person';
-  // Οι επιλογές κατεύθυνσης ακολουθούν το επιλεγμένο άτομο, με το ίδιο λεκτικό
-  // που εμφανίζεται και στις κάρτες υπολοίπων.
+  // Το πρόσωπο μπορεί να έρχεται από την επιλεγμένη κάρτα (fixedPerson)· τότε
+  // δεν εμφανίζεται επιλογέας μέσα στη φόρμα.
+  const person = fixedPerson ?? ownPerson;
+  const showPersonSelect = isPerson && !fixedPerson;
+  // Οι επιλογές κατεύθυνσης ακολουθούν το άτομο, με το ίδιο λεκτικό που
+  // εμφανίζεται και στις κάρτες υπολοίπων.
   const options = directionOptions(isPerson ? person : 'botanicos');
 
   const val = parseFloat(amount);
@@ -43,10 +47,10 @@ export default function EntryForm({ module, onAdd }) {
 
   return (
     <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
-      {isPerson && (
+      {showPersonSelect && (
         <div className="space-y-1.5">
           <Label>Άτομο</Label>
-          <Select value={person} onValueChange={setPerson}>
+          <Select value={person} onValueChange={setOwnPerson}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="manos">Μάνος</SelectItem>

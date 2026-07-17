@@ -8,11 +8,10 @@ import { useToast } from '@/components/ui/use-toast';
 import { listAllEntries, getSettings, fmt } from '@/lib/api';
 import { round2, sumActive, computeMonthlyClose, applyActualContribution } from '@shared/finance';
 import { owedInfo } from '@/lib/labels';
-import PageHeader from '@/components/PageHeader';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { settlements } from '@/api/client';
 
-export default function MonthlyClose() {
+export default function MonthlyClose({ onClosed }) {
   const { toast } = useToast();
   const [settings, setSettings] = useState(null);
   const [entries, setEntries] = useState([]);
@@ -72,6 +71,7 @@ export default function MonthlyClose() {
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       await reload();
       setEntered('');
+      onClosed?.();
     } catch (err) {
       toast({ title: 'Σφάλμα κλεισίματος', description: err.message, variant: 'destructive' });
     } finally {
@@ -83,7 +83,6 @@ export default function MonthlyClose() {
 
   return (
     <div>
-      <PageHeader title="Κλείσιμο μήνα" subtitle="Μέτρα το κουτί — η εφαρμογή βγάζει τι βάζει ο καθένας" />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="border-stone-200">
           <CardHeader><CardTitle className="text-base">Είσοδος</CardTitle></CardHeader>

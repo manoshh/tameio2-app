@@ -15,6 +15,7 @@ const REGISTRY = {
     tag: 'bg-sky-100 text-sky-800 border-sky-200 hover:bg-sky-100',
     card: 'bg-sky-50 border-sky-200',
     accent: 'text-sky-600',
+    ring: 'ring-sky-400',
   },
   eirini: {
     key: 'eirini',
@@ -24,6 +25,7 @@ const REGISTRY = {
     tag: 'bg-violet-100 text-violet-800 border-violet-200 hover:bg-violet-100',
     card: 'bg-violet-50 border-violet-200',
     accent: 'text-violet-600',
+    ring: 'ring-violet-400',
   },
   botanicos: {
     key: 'botanicos',
@@ -33,6 +35,7 @@ const REGISTRY = {
     tag: 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100',
     card: 'bg-amber-50 border-amber-200',
     accent: 'text-amber-600',
+    ring: 'ring-amber-400',
   },
 };
 
