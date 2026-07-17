@@ -2,6 +2,7 @@ import React from 'react';
 import { Trash2 } from 'lucide-react';
 import { fmt, fmtDate } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
+import { partyInfo } from '@/lib/labels';
 
 export default function EntryList({ entries, showPerson, onDelete }) {
   if (entries.length === 0) {
@@ -11,17 +12,20 @@ export default function EntryList({ entries, showPerson, onDelete }) {
     <div className="divide-y divide-stone-100">
       {entries.map((e) => {
         const positive = e.amount >= 0;
+        const party = partyInfo(showPerson ? e.person : 'botanicos');
         return (
           <div key={e.id} className="flex items-center gap-3 py-3">
             <div className={`w-2 h-10 rounded-full ${positive ? 'bg-emerald-500' : 'bg-rose-400'}`} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-medium text-stone-800 truncate">{e.description || 'Χωρίς περιγραφή'}</span>
-                {showPerson && (
-                  <Badge variant="outline" className="text-xs">{e.person === 'manos' ? 'Μάνος' : 'Ειρήνη'}</Badge>
+                {showPerson && party && (
+                  <Badge variant="outline" className={`text-xs ${party.tag}`}>{party.name}</Badge>
                 )}
                 {e.carryOverSettlementId && (
-                  <Badge className="text-xs bg-amber-100 text-amber-800 hover:bg-amber-100">carry-over</Badge>
+                  <Badge variant="outline" className="text-xs bg-stone-100 text-stone-600 border-stone-200 hover:bg-stone-100">
+                    μεταφορά
+                  </Badge>
                 )}
               </div>
               <div className="text-xs text-stone-400">{fmtDate(e.date)}</div>

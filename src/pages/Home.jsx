@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Users, Leaf, CalendarCheck, Target } from 'lucide-react';
 import { listAllEntries, listSettlements, getSettings, fmt, fmtDate } from '@/lib/api';
 import { sumActive } from '@shared/finance';
+import { owedInfo } from '@/lib/labels';
 import PageHeader from '@/components/PageHeader';
 
 export default function Home() {
@@ -27,9 +28,9 @@ export default function Home() {
     <div>
       <PageHeader title="Κοινό Ταμείο" subtitle="Μάνος & Ειρήνη — στόχος & διακανονισμός" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Stat icon={Users} label="Χρωστάει το ταμείο ↔ Μάνος" negativeLabel="Χρωστάει ο Μάνος στο ταμείο" value={manos} />
-        <Stat icon={Users} label="Χρωστάει το ταμείο ↔ Ειρήνη" negativeLabel="Χρωστάει η Ειρήνη στο ταμείο" value={eirini} />
-        <Stat icon={Leaf} label="Χρωστάει το ταμείο ↔ Βοτανικός" negativeLabel="Χρωστάει ο Βοτανικός στο ταμείο" value={botanicos} />
+        <Stat icon={Users} party="manos" value={manos} />
+        <Stat icon={Users} party="eirini" value={eirini} />
+        <Stat icon={Leaf} party="botanicos" value={botanicos} />
         <Stat icon={Target} label="Στόχος-απόθεμα" value={settings?.targetReserve || 0} muted />
       </div>
 
@@ -83,17 +84,32 @@ export default function Home() {
   );
 }
 
-function Stat({ icon: Icon, label, negativeLabel, value, muted }) {
-  const negative = !muted && value < 0;
-  const positive = !muted && value > 0;
+// Το χρώμα φόντου ανήκει στο πρόσωπο (δες lib/labels.js) και είναι το ίδιο με
+// το tag του στη λίστα εγγραφών.
+function Stat({ icon: Icon, party, label, value, muted }) {
+  if (muted) {
+    return (
+      <Card className="border-stone-200">
+        <CardContent className="pt-5">
+          <div className="flex items-center gap-2 text-stone-400 mb-1">
+            <Icon size={15} />
+            <span className="text-xs">{label}</span>
+          </div>
+          <div className="text-xl font-semibold tabular-nums text-stone-700">{fmt(value)}</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const info = owedInfo(party, value);
   return (
-    <Card className="border-stone-200">
+    <Card className={info.party.card}>
       <CardContent className="pt-5">
-        <div className="flex items-center gap-2 text-stone-400 mb-1">
-          <Icon size={15} />
-          <span className="text-xs">{negative ? negativeLabel : label}</span>
+        <div className="flex items-center gap-2 mb-1">
+          <Icon size={15} className={info.party.accent} />
+          <span className="text-xs text-stone-600 leading-tight">{info.label}</span>
         </div>
-        <div className={`text-xl font-semibold tabular-nums ${muted ? 'text-stone-700' : negative ? 'text-rose-600' : positive ? 'text-emerald-700' : 'text-stone-900'}`}>{fmt(negative ? -value : value)}</div>
+        <div className={`text-xl font-semibold tabular-nums ${info.colorClass}`}>{fmt(info.amount)}</div>
       </CardContent>
     </Card>
   );

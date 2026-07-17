@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { listEntries, getSettings, fmt } from '@/lib/api';
 import { sumActive } from '@shared/finance';
+import { owedInfo } from '@/lib/labels';
 import EntryForm from './EntryForm';
 import EntryList from './EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -66,13 +67,13 @@ export default function LedgerModule({ module }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {isPerson ? (
           <>
-            <BalanceCard label="Χρωστάει το ταμείο ↔ Μάνος" negativeLabel="Χρωστάει ο Μάνος στο ταμείο" value={manosOwed} />
-            <BalanceCard label="Χρωστάει το ταμείο ↔ Ειρήνη" negativeLabel="Χρωστάει η Ειρήνη στο ταμείο" value={eiriniOwed} />
+            <BalanceCard party="manos" value={manosOwed} />
+            <BalanceCard party="eirini" value={eiriniOwed} />
             <BalanceCard label="Στόχος-απόθεμα" value={settings?.targetReserve || 0} muted />
           </>
         ) : (
           <>
-            <BalanceCard label="Χρωστάει το ταμείο ↔ Βοτανικός" negativeLabel="Χρωστάει ο Βοτανικός στο ταμείο" value={botanicosBal} />
+            <BalanceCard party="botanicos" value={botanicosBal} />
             <BalanceCard label="Στόχος-απόθεμα" value={settings?.targetReserve || 0} muted />
           </>
         )}
@@ -117,17 +118,26 @@ export default function LedgerModule({ module }) {
   );
 }
 
-function BalanceCard({ label, negativeLabel, value, muted }) {
-  const negative = !muted && value < 0;
-  const positive = !muted && value > 0;
-  const shown = negative ? -value : value;
+// Κάρτα υπολοίπου. Το χρώμα φόντου ανήκει στο πρόσωπο (δες lib/labels.js) και
+// είναι το ίδιο με το tag του στη λίστα εγγραφών.
+function BalanceCard({ party, label, value, muted }) {
+  if (muted) {
+    return (
+      <Card className="border-stone-200">
+        <CardContent className="pt-5">
+          <div className="text-xs text-stone-500 mb-1">{label}</div>
+          <div className="text-2xl font-semibold tabular-nums text-stone-700">{fmt(value)}</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const info = owedInfo(party, value);
   return (
-    <Card className="border-stone-200">
+    <Card className={info.party.card}>
       <CardContent className="pt-5">
-        <div className="text-xs text-stone-500 mb-1">{negative ? negativeLabel : label}</div>
-        <div className={`text-2xl font-semibold tabular-nums ${muted ? 'text-stone-700' : negative ? 'text-rose-600' : positive ? 'text-emerald-700' : 'text-stone-700'}`}>
-          {fmt(shown)}
-        </div>
+        <div className="text-xs text-stone-600 mb-1">{info.label}</div>
+        <div className={`text-2xl font-semibold tabular-nums ${info.colorClass}`}>{fmt(info.amount)}</div>
       </CardContent>
     </Card>
   );

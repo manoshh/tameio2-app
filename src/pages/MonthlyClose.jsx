@@ -34,8 +34,9 @@ export default function MonthlyClose() {
 
   const enteredNum = parseFloat(entered) || 0;
   const effectiveBalance = round2(enteredNum - botanicosBal);
-  const manosBefore = owedInfo('Μάνος', manosOwed);
-  const eiriniBefore = owedInfo('Ειρήνη', eiriniOwed);
+  const manosBefore = owedInfo('manos', manosOwed);
+  const eiriniBefore = owedInfo('eirini', eiriniOwed);
+  const botanicosInfo = owedInfo('botanicos', botanicosBal);
 
   const calc = useMemo(
     () => (settings ? computeMonthlyClose(settings.targetReserve, effectiveBalance, manosOwed, eiriniOwed) : null),
@@ -114,14 +115,14 @@ export default function MonthlyClose() {
             )}
             <div className="pt-3 border-t border-stone-100 space-y-3">
               <PersonResult
-                name="Μάνος"
+                party="manos"
                 computed={calc.manos}
                 result={final.manos}
                 value={paid.manos}
                 onChange={(v) => setPaid((p) => ({ ...p, manos: v }))}
               />
               <PersonResult
-                name="Ειρήνη"
+                party="eirini"
                 computed={calc.eirini}
                 result={final.eirini}
                 value={paid.eirini}
@@ -142,18 +143,16 @@ export default function MonthlyClose() {
           </DialogHeader>
           <div className="space-y-3 text-sm text-stone-700">
             {botanicosBal !== 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-1">
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1">
                 <p className="font-medium text-amber-900">
-                  {botanicosBal > 0
-                    ? `Το Ταμείο χρωστάει ${fmt(botanicosBal)} στον Βοτανικό.`
-                    : `Ο Βοτανικός χρωστάει ${fmt(-botanicosBal)} στο Ταμείο.`}
+                  {botanicosInfo.label}: {fmt(botanicosInfo.amount)}
                 </p>
                 <p className="text-amber-800 text-xs">Κάνε πρώτα την τραπεζική μεταφορά και μετά επιβεβαίωσε.</p>
               </div>
             )}
             <div className="bg-stone-50 rounded-lg p-3 space-y-2">
-              <SummaryRow label="Μάνος καταθέτει" value={fmt(actual.manos)} />
-              <SummaryRow label="Ειρήνη καταθέτει" value={fmt(actual.eirini)} />
+              <SummaryRow label="Ο Μάνος καταθέτει" value={fmt(actual.manos)} />
+              <SummaryRow label="Η Ειρήνη καταθέτει" value={fmt(actual.eirini)} />
               <div className="pt-2 border-t border-stone-200">
                 <SummaryRow label="Το κουτί γίνεται" value={fmt(round2(effectiveBalance + actual.manos + actual.eirini))} strong />
               </div>
@@ -161,8 +160,8 @@ export default function MonthlyClose() {
             {(final.manos.owedAfter !== 0 || final.eirini.owedAfter !== 0) && (
               <div className="text-xs text-stone-500 space-y-1">
                 <p className="font-medium text-stone-600">Μεταφέρονται στον επόμενο μήνα:</p>
-                {final.manos.owedAfter !== 0 && <CarryLine name="Μάνος" value={final.manos.owedAfter} />}
-                {final.eirini.owedAfter !== 0 && <CarryLine name="Ειρήνη" value={final.eirini.owedAfter} />}
+                {final.manos.owedAfter !== 0 && <CarryLine party="manos" value={final.manos.owedAfter} />}
+                {final.eirini.owedAfter !== 0 && <CarryLine party="eirini" value={final.eirini.owedAfter} />}
               </div>
             )}
           </div>
@@ -194,8 +193,8 @@ function SummaryRow({ label, value, strong }) {
   );
 }
 
-function CarryLine({ name, value }) {
-  const info = owedInfo(name, value);
+function CarryLine({ party, value }) {
+  const info = owedInfo(party, value);
   return (
     <div className="flex justify-between">
       <span>{info.label}</span>
@@ -204,16 +203,16 @@ function CarryLine({ name, value }) {
   );
 }
 
-function PersonResult({ name, computed, result, value, onChange }) {
-  const after = owedInfo(name, result.owedAfter);
+function PersonResult({ party, computed, result, value, onChange }) {
+  const after = owedInfo(party, result.owedAfter);
   const diff = round2(result.contribution - computed.contribution);
 
   return (
-    <div className="bg-stone-50 rounded-lg p-3 space-y-2">
+    <div className={`rounded-lg border p-3 space-y-2 ${after.party.card}`}>
       <div className="flex items-center justify-between">
-        <span className="font-medium text-stone-800">{name}</span>
+        <span className="font-medium text-stone-800">{after.party.name}</span>
         {computed.offset !== 0 && (
-          <span className="text-xs text-stone-400">συμψηφισμός {fmt(computed.offset)}</span>
+          <span className="text-xs text-stone-500">συμψηφισμός {fmt(computed.offset)}</span>
         )}
       </div>
 
