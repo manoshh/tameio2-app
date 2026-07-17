@@ -34,6 +34,17 @@ function archiveEntries(client, ids, settlementId) {
   return client.query('update ledger_entry set "settlementId" = $1, updated_date = now() where id = any($2::uuid[])', [settlementId, ids]);
 }
 
+// Ο μήνας μιας αρχειοθέτησης είναι ο μήνας στον οποίο ανήκουν οι εγγραφές — όχι
+// η στιγμή του κλεισίματος. Στη ροή του χρήστη το κλείσιμο γίνεται στις αρχές
+// του επόμενου μήνα, οπότε ο τίτλος πρέπει να δείχνει τον προηγούμενο. Τον
+// βγάζουμε από την πιο πρόσφατη ημερομηνία εγγραφής (μορφή 'YYYY-MM-DD').
+function periodFromEntries(entries, fallback) {
+  const dates = entries.map((e) => e.date).filter(Boolean).sort();
+  if (!dates.length) return fallback;
+  const [year, month] = dates[dates.length - 1].split('-');
+  return { month: Number(month), year: Number(year) };
+}
+
 async function createBotanicosSettlement(client, { month, year, balanceBefore, timestamp }) {
   const { rows } = await client.query(
     'insert into botanicos_settlement (month, year, "balanceBefore", "timestamp") values ($1, $2, $3, $4) returning *',
@@ -84,14 +95,18 @@ const OPERATIONS = {
       };
 
       const now = new Date();
-      const month = now.getMonth() + 1;
-      const year = now.getFullYear();
       const timestamp = now.toISOString();
+      const fallback = { month: now.getMonth() + 1, year: now.getFullYear() };
+
+      const activeBotanicos = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
+      const activePerson = entries.filter((e) => e.module === 'person' && !e.settlementId);
+      const period = periodFromEntries(activePerson, fallback);
+      const { month, year } = period;
 
       // 1) Διακανονισμός Βοτανικού (μετά την τραπεζική μεταφορά)
       if (botanicosBalance !== 0) {
-        const bs = await createBotanicosSettlement(client, { month, year, balanceBefore: botanicosBalance, timestamp });
-        const activeBotanicos = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
+        const bp = periodFromEntries(activeBotanicos, fallback);
+        const bs = await createBotanicosSettlement(client, { month: bp.month, year: bp.year, balanceBefore: botanicosBalance, timestamp });
         await archiveEntries(client, activeBotanicos.map((e) => e.id), bs.id);
       }
 
@@ -113,7 +128,6 @@ const OPERATIONS = {
       const settlement = deserializeRow(ENTITIES.Settlement, rows[0]);
 
       // 3) Αρχειοθέτηση των ενεργών εγγραφών ατόμων
-      const activePerson = entries.filter((e) => e.module === 'person' && !e.settlementId);
       await archiveEntries(client, activePerson.map((e) => e.id), settlement.id);
 
       // 4) Ό,τι μένει ανοιχτό γίνεται ενεργή εγγραφή για τον επόμενο μήνα —
@@ -159,15 +173,16 @@ const OPERATIONS = {
   async botanicosSettle() {
     return transaction(async (client) => {
       const entries = await loadEntries(client);
+      const active = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
       const balanceBefore = sumActive(entries, (e) => e.module === 'botanicos');
 
       const now = new Date();
+      const period = periodFromEntries(active, { month: now.getMonth() + 1, year: now.getFullYear() });
       const bs = await createBotanicosSettlement(client, {
-        month: now.getMonth() + 1, year: now.getFullYear(), balanceBefore, timestamp: now.toISOString(),
+        month: period.month, year: period.year, balanceBefore, timestamp: now.toISOString(),
       });
 
       // Η αρχειοθέτηση των εγγραφών μηδενίζει από μόνη της το υπόλοιπο.
-      const active = entries.filter((e) => e.module === 'botanicos' && !e.settlementId);
       await archiveEntries(client, active.map((e) => e.id), bs.id);
 
       return { settlement: bs };

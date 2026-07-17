@@ -483,6 +483,27 @@ const bundo = await settle({ op: 'undoBotanicos' });
 const botAfter = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
 check('Αναίρεση Βοτανικού επαναφέρει την εγγραφή', bundo.statusCode === 200 && botAfter[0]?.settlementId === '');
 
+// ── Μήνας αρχειοθέτησης από τις εγγραφές, όχι από το «τώρα» ─────────────
+// Ο χρήστης κλείνει στις αρχές του επόμενου μήνα· ο τίτλος πρέπει να δείχνει
+// τον μήνα των εγγραφών (εδώ: Μάρτιος 2025), όχι τον τρέχοντα.
+await query('delete from ledger_entry');
+await query('delete from settlement');
+await query('delete from botanicos_settlement');
+await data({ entity: 'LedgerEntry', op: 'bulkCreate', args: { items: [
+  entry({ person: 'manos', amount: 40, date: '2025-03-10' }),
+  entry({ module: 'botanicos', person: null, amount: 15, date: '2025-03-12' }),
+] } });
+const periodClose = await settle({ op: 'close', args: { enteredBalance: 500 } });
+check('Ο μήνας του κλεισίματος βγαίνει από τις εγγραφές (Μάρτιος 2025)',
+  periodClose.body?.settlement?.month === 3 && periodClose.body?.settlement?.year === 2025,
+  `πήρε ${periodClose.body?.settlement?.month}/${periodClose.body?.settlement?.year}`);
+const periodBot = (await data({ entity: 'BotanicosSettlement', op: 'list', args: {} })).body[0];
+check('Ο διακανονισμός Βοτανικού παίρνει κι αυτός τον μήνα των εγγραφών',
+  periodBot?.month === 3 && periodBot?.year === 2025, `πήρε ${periodBot?.month}/${periodBot?.year}`);
+await settle({ op: 'undoClose' });
+await settle({ op: 'undoBotanicos' });
+await query('delete from ledger_entry');
+
 const emptyUndo = await settle({ op: 'undoClose' });
 check('Αναίρεση χωρίς κλείσιμο απορρίπτεται καθαρά', emptyUndo.statusCode === 404, `πήρε ${emptyUndo.statusCode}`);
 
