@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
@@ -10,12 +11,13 @@ import PageHeader from '@/components/PageHeader';
 import EntryForm from '@/components/ledger/EntryForm';
 import EntryList from '@/components/ledger/EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { RotateCcw, Archive, ChevronRight, Undo2 } from 'lucide-react';
+import { RotateCcw, Archive, ChevronRight, Undo2, ArrowRight } from 'lucide-react';
 
 const PARTIES = ['manos', 'eirini', 'botanicos'];
 
 export default function Treasury() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [entries, setEntries] = useState([]);
   const [settlements, setSettlements] = useState([]);
   const [botanicosSettlements, setBotanicosSettlements] = useState([]);
@@ -131,12 +133,19 @@ export default function Treasury() {
         {PARTIES.map((key) => (
           <SelectableCard key={key} party={key} value={balances[key]} active={selected === key} onSelect={() => setSelected(key)} />
         ))}
-        <Card className="border-stone-200">
-          <CardContent className="pt-5">
-            <div className="text-xs text-stone-500 mb-1">Στόχος-απόθεμα</div>
-            <div className="text-2xl font-semibold tabular-nums text-stone-700">{fmt(settings.targetReserve)}</div>
-          </CardContent>
-        </Card>
+        {/* Δεν επιλέγεται σαν τις τρεις προηγούμενες — οδηγεί στο Κλείσιμο μήνα.
+            Το βελάκι δηλώνει ότι εδώ φεύγεις από τη σελίδα, όχι ότι διαλέγεις. */}
+        <button
+          type="button"
+          onClick={() => navigate('/close')}
+          className="text-left rounded-xl p-4 border border-stone-200 bg-white hover:bg-stone-50 transition-colors"
+        >
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className="text-xs text-stone-500">Στόχος-απόθεμα</span>
+            <ArrowRight size={14} className="text-stone-400 shrink-0" />
+          </div>
+          <div className="text-xl lg:text-2xl font-semibold tabular-nums text-stone-700">{fmt(settings.targetReserve)}</div>
+        </button>
       </div>
 
       <Card className="mb-6">
