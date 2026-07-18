@@ -88,20 +88,20 @@ export default function MonthlyClose({ onClosed }) {
           <CardHeader><CardTitle className="text-base">Είσοδος</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Πραγματικό μετρημένο υπόλοιπο (€)</Label>
+              <Label>Τρέχον υπόλοιπο Πειραιώς</Label>
               <Input type="number" step="0.01" value={entered} onChange={(e) => setEntered(e.target.value)} placeholder="0.00" autoFocus />
-              <p className="text-xs text-stone-400">Όσα μετράς στο κουτί αυτή τη στιγμή.</p>
+              <p className="text-xs text-stone-400">Το υπόλοιπο του λογαριασμού Πειραιώς αυτή τη στιγμή.</p>
             </div>
 
             {/* Η αλυσίδα από το μετρημένο ώς το «λείπουν». Χωρίς αυτήν, το τελικό
                 νούμερο δεν εξηγείται: το μετρημένο ΔΕΝ είναι η πραγματική θέση
                 του ταμείου όσο εκκρεμούν οφειλές. */}
             <div className="text-sm space-y-1.5 pt-3 border-t border-stone-100">
-              <Row label="Μετρημένο υπόλοιπο" value={fmt(enteredNum)} />
+              <Row label="Τρέχον υπόλοιπο Πειραιώς" value={fmt(enteredNum)} />
 
               {botanicosBal !== 0 && (
                 <Adjustment
-                  label={botanicosInfo.negative ? 'Ο Βοτανικός σού χρωστάει — θα μπουν' : 'Χρωστάς στον Βοτανικό — θα βγουν'}
+                  label={botanicosInfo.negative ? 'Ο Βοτανικός χρωστάει στο Ταμείο (θα προστεθούν)' : 'Το Ταμείο χρωστάει στον Βοτανικό (θα αφαιρεθούν)'}
                   delta={-botanicosBal}
                 />
               )}
