@@ -414,6 +414,38 @@ const manosAfterUndo = personActive
   .reduce((s, e) => s + e.amount, 0);
 check('Το υπόλοιπο του Μάνου επανήλθε στο 100 (από τις εγγραφές)', manosAfterUndo === 100, `πήρε ${manosAfterUndo}`);
 
+// ── Αναίρεση ανά πρόσωπο ───────────────────────────────────────────────
+// Ένα settlement είναι κοινό· η αναίρεση από το αρχείο ενός προσώπου πρέπει να
+// επαναφέρει ΜΟΝΟ τις δικές του εγγραφές και να αφήνει άθικτο τον άλλον. Το
+// settlement διαγράφεται μόνο όταν αδειάσουν και τα δύο.
+await query('delete from ledger_entry');
+await query('delete from settlement');
+await data({ entity: 'LedgerEntry', op: 'bulkCreate', args: { items: [
+  entry({ person: 'manos', amount: 100 }),
+  entry({ person: 'eirini', amount: 60 }),
+] } });
+const perClose = await settle({ op: 'close', args: { enteredBalance: 500 } });
+const perId = perClose.body?.settlement?.id;
+check('Κλείσιμο για αναίρεση ανά πρόσωπο', perClose.statusCode === 200 && !!perId, JSON.stringify(perClose.body));
+
+const perUndoM = await settle({ op: 'undoClose', args: { settlementId: perId, person: 'manos' } });
+check('Αναίρεση μόνο του Μάνου πετυχαίνει', perUndoM.statusCode === 200, JSON.stringify(perUndoM.body));
+const afterPerM = (await data({ entity: 'LedgerEntry', op: 'list', args: { limit: 100 } })).body;
+check('Οι εγγραφές του Μάνου επανήλθαν ενεργές',
+  afterPerM.some((e) => e.person === 'manos' && e.module === 'person' && e.settlementId === ''),
+  JSON.stringify(afterPerM.map((e) => [e.person, e.settlementId])));
+check('Οι εγγραφές της Ειρήνης ΠΑΡΑΜΕΝΟΥΝ αρχειοθετημένες',
+  afterPerM.filter((e) => e.person === 'eirini' && e.module === 'person').every((e) => e.settlementId === perId),
+  JSON.stringify(afterPerM.filter((e) => e.person === 'eirini').map((e) => e.settlementId)));
+check('Το κοινό settlement δεν διαγράφηκε (μένει η Ειρήνη)',
+  (await data({ entity: 'Settlement', op: 'list', args: {} })).body.length === 1);
+
+const perUndoE = await settle({ op: 'undoClose', args: { settlementId: perId, person: 'eirini' } });
+check('Αναίρεση και της Ειρήνης πετυχαίνει', perUndoE.statusCode === 200, JSON.stringify(perUndoE.body));
+check('Με άδειο settlement, αυτό διαγράφεται',
+  (await data({ entity: 'Settlement', op: 'list', args: {} })).body.length === 0);
+await query('delete from ledger_entry');
+
 // ── Πιστωτικό μεγαλύτερο από το μερίδιο ────────────────────────────────
 // Το σενάριο που όρισε ο χρήστης: κανείς δεν βγάζει μετρητά· ό,τι περισσεύει
 // μεταφέρεται.

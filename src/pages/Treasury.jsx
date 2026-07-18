@@ -25,7 +25,7 @@ export default function Treasury() {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [zeroOpen, setZeroOpen] = useState(false);
   const [settleOpen, setSettleOpen] = useState(false);
-  const [undoOpen, setUndoOpen] = useState(false);
+  const [undoTarget, setUndoTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -56,12 +56,16 @@ export default function Treasury() {
   );
 
   // Αρχείο του επιλεγμένου: κάθε αρχειοθέτηση με τις εγγραφές που ομαδοποίησε.
-  const archiveList = (isPerson ? settlements : botanicosSettlements).map((s) => {
-    const grouped = entries.filter((e) =>
-      e.settlementId === s.id && (isPerson ? (e.module === 'person' && e.person === selected) : e.module === 'botanicos')
-    );
-    return { settlement: s, entries: grouped, total: round2(grouped.reduce((sum, e) => sum + (e.amount || 0), 0)) };
-  });
+  // Ένα settlement είναι κοινό για δύο άτομα· αν το ένα αναιρέθηκε ξεχωριστά,
+  // δεν έχει πια εγγραφές αυτού του προσώπου — τότε δεν το δείχνουμε εδώ.
+  const archiveList = (isPerson ? settlements : botanicosSettlements)
+    .map((s) => {
+      const grouped = entries.filter((e) =>
+        e.settlementId === s.id && (isPerson ? (e.module === 'person' && e.person === selected) : e.module === 'botanicos')
+      );
+      return { settlement: s, entries: grouped, total: round2(grouped.reduce((sum, e) => sum + (e.amount || 0), 0)) };
+    })
+    .filter((a) => a.entries.length > 0);
 
   const addEntry = async (data) => {
     await db.entities.LedgerEntry.create({ ...data, settlementId: '', carryOverSettlementId: '' });
@@ -105,11 +109,15 @@ export default function Treasury() {
     toast({ title: 'Ο διακανονισμός Βοτανικού ολοκληρώθηκε' });
   }); };
 
-  const undoLatest = () => { setUndoOpen(false); runSettle(async () => {
-    if (isPerson) await settlementsApi.undoClose();
-    else await settlementsApi.undoBotanicos();
-    toast({ title: 'Η αναίρεση ολοκληρώθηκε' });
-  }); };
+  const undoLatest = () => {
+    const target = undoTarget;
+    setUndoTarget(null);
+    runSettle(async () => {
+      if (isPerson) await settlementsApi.undoClose({ settlementId: target, person: selected });
+      else await settlementsApi.undoBotanicos();
+      toast({ title: 'Η αναίρεση ολοκληρώθηκε' });
+    });
+  };
 
   if (loading || !settings) return <div className="py-10 text-center text-stone-400 text-sm">Φόρτωση...</div>;
 
@@ -172,7 +180,7 @@ export default function Treasury() {
                 a={a}
                 recent={i === 0}
                 busy={busy}
-                onUndo={() => setUndoOpen(true)}
+                onUndo={() => setUndoTarget(a.settlement.id)}
               />
             ))
           )}
@@ -201,11 +209,11 @@ export default function Treasury() {
         confirmText="Διακανονισμός" onConfirm={settleBotanicos}
       />
       <ConfirmDialog
-        open={undoOpen}
-        onOpenChange={setUndoOpen}
+        open={!!undoTarget}
+        onOpenChange={(o) => !o && setUndoTarget(null)}
         title="Αναίρεση τελευταίας αρχειοθέτησης;"
         description={isPerson
-          ? 'Θα αναιρεθεί το τελευταίο κλείσιμο μήνα: οι εγγραφές επανέρχονται ως ενεργές (για Μάνο και Ειρήνη) και τα carry-over διαγράφονται.'
+          ? `Θα αναιρεθεί το κλείσιμο μόνο για ${selectedName}: οι εγγραφές του επανέρχονται ως ενεργές και τα carry-over του διαγράφονται. Οι εγγραφές του άλλου προσώπου μένουν άθικτες.`
           : 'Οι εγγραφές Βοτανικού θα επανέλθουν ως ενεργές.'}
         confirmText="Αναίρεση" destructive onConfirm={undoLatest}
       />

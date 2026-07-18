@@ -151,22 +151,51 @@ const OPERATIONS = {
     });
   },
 
-  // Αναίρεση του πιο πρόσφατου κλεισίματος ατόμων.
-  // Δεν αναιρεί τον διακανονισμό Βοτανικού — αυτός είναι ξεχωριστή εγγραφή και
-  // αναιρείται από τη δική του σελίδα, όπως ίσχυε και πριν.
-  async undoClose() {
+  // Αναίρεση κλεισίματος ατόμων.
+  //
+  // Ένα settlement είναι κοινό για Μάνο και Ειρήνη. Από το αρχείο κάθε προσώπου
+  // η αναίρεση αφορά ΜΟΝΟ αυτό το πρόσωπο: επαναφέρουμε τις δικές του εγγραφές
+  // και σβήνουμε τα δικά του carry-over, αφήνοντας άθικτο ό,τι αφορά τον άλλον.
+  // Το settlement διαγράφεται μόνο όταν πια δεν το δείχνει καμία εγγραφή.
+  //
+  // Χωρίς όρισμα (π.χ. από παλιά ροή/δοκιμές) αναιρεί ολόκληρο το πιο πρόσφατο.
+  // Δεν αγγίζει τον διακανονισμό Βοτανικού — αυτός αναιρείται ξεχωριστά.
+  async undoClose({ settlementId, person } = {}) {
     return transaction(async (client) => {
-      const { rows } = await client.query('select * from settlement order by "timestamp" desc limit 1');
-      if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει κλείσιμο προς αναίρεση');
-      const latest = deserializeRow(ENTITIES.Settlement, rows[0]);
+      let target = settlementId;
+      if (!target) {
+        const { rows } = await client.query('select id from settlement order by "timestamp" desc limit 1');
+        if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει κλείσιμο προς αναίρεση');
+        target = rows[0].id;
+      } else {
+        const { rows } = await client.query('select id from settlement where id = $1', [target]);
+        if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει κλείσιμο προς αναίρεση');
+      }
 
-      // Σβήνουμε τα carry-over και επαναφέρουμε τις αρχειοθετημένες ως ενεργές:
-      // τα υπόλοιπα επανέρχονται μόνα τους, αφού προκύπτουν από τις εγγραφές.
-      await client.query('delete from ledger_entry where "carryOverSettlementId" = $1', [latest.id]);
-      await client.query('update ledger_entry set "settlementId" = \'\', updated_date = now() where "settlementId" = $1', [latest.id]);
-      await client.query('delete from settlement where id = $1', [latest.id]);
+      const persons = person ? [person] : ['manos', 'eirini'];
 
-      return { undone: latest.id };
+      // Σβήνουμε τα carry-over και επαναφέρουμε τις αρχειοθετημένες ως ενεργές
+      // — μόνο για τα ζητούμενα άτομα. Τα υπόλοιπα επανέρχονται μόνα τους.
+      await client.query(
+        'delete from ledger_entry where "carryOverSettlementId" = $1 and person = any($2::text[])',
+        [target, persons]
+      );
+      await client.query(
+        'update ledger_entry set "settlementId" = \'\', updated_date = now() where "settlementId" = $1 and person = any($2::text[])',
+        [target, persons]
+      );
+
+      // Το settlement κρατά τα δεδομένα του άλλου προσώπου· το διαγράφουμε μόνο
+      // όταν πια καμία εγγραφή (αρχειοθετημένη ή carry-over) δεν το δείχνει.
+      const { rows: remaining } = await client.query(
+        'select 1 from ledger_entry where "settlementId" = $1 or "carryOverSettlementId" = $1 limit 1',
+        [target]
+      );
+      if (!remaining[0]) {
+        await client.query('delete from settlement where id = $1', [target]);
+      }
+
+      return { undone: target, person: person || null };
     });
   },
 
