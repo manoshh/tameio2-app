@@ -8,6 +8,7 @@ import { sumActive, round2 } from '@shared/finance';
 import { owedInfo } from '@/lib/labels';
 import { db, settlements as settlementsApi } from '@/api/client';
 import PageHeader from '@/components/PageHeader';
+import SettingsButton from '@/components/SettingsButton';
 import EntryForm from '@/components/ledger/EntryForm';
 import EntryList from '@/components/ledger/EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -125,7 +126,7 @@ export default function Treasury() {
 
   return (
     <div>
-      <PageHeader title="Ταμείο" subtitle="Υπόλοιπα, εγγραφές και αρχείο ανά πρόσωπο" />
+      <PageHeader title="Ταμείο" subtitle="Υπόλοιπα, εγγραφές και αρχείο ανά πρόσωπο" action={<SettingsButton />} />
 
       {/* 4 κάρτες: 2×2 σε mobile, 4 σε σειρά σε desktop. Οι τρεις πρώτες
           επιλέγονται — η επιλεγμένη ορίζει τι φαίνεται από κάτω. */}
