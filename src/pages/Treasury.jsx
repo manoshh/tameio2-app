@@ -12,7 +12,7 @@ import SettingsButton from '@/components/SettingsButton';
 import EntryForm from '@/components/ledger/EntryForm';
 import EntryList from '@/components/ledger/EntryList';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { RotateCcw, Archive, ChevronRight, Undo2, ArrowRight } from 'lucide-react';
+import { RotateCcw, ChevronRight, Undo2, ArrowRight } from 'lucide-react';
 
 const PARTIES = ['manos', 'eirini', 'botanicos'];
 
@@ -27,7 +27,6 @@ export default function Treasury() {
   const [selected, setSelected] = useState('manos');
   const [pendingDelete, setPendingDelete] = useState(null);
   const [zeroOpen, setZeroOpen] = useState(false);
-  const [settleOpen, setSettleOpen] = useState(false);
   const [undoTarget, setUndoTarget] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -107,11 +106,6 @@ export default function Treasury() {
     }
   };
 
-  const settleBotanicos = () => { setSettleOpen(false); runSettle(async () => {
-    await settlementsApi.botanicosSettle();
-    toast({ title: 'Ο διακανονισμός Βοτανικού ολοκληρώθηκε' });
-  }); };
-
   const undoLatest = () => {
     const target = undoTarget;
     setUndoTarget(null);
@@ -160,11 +154,6 @@ export default function Treasury() {
         <CardHeader className="flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base">Ενεργές εγγραφές — {selectedName} ({visibleEntries.length})</CardTitle>
           <div className="flex gap-2">
-            {!isPerson && balances.botanicos !== 0 && (
-              <Button variant="outline" size="sm" className="text-emerald-700 border-emerald-200 hover:bg-emerald-50" disabled={busy} onClick={() => setSettleOpen(true)}>
-                <Archive size={14} className="mr-1" /> Διακανονισμός
-              </Button>
-            )}
             {visibleEntries.length > 0 && (
               <Button variant="outline" size="sm" className="text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => setZeroOpen(true)}>
                 <RotateCcw size={14} className="mr-1" /> Μηδενισμός
@@ -210,13 +199,6 @@ export default function Treasury() {
         title={`Μηδενισμός — ${selectedName};`}
         description="Θα διαγραφούν όλες οι ενεργές εγγραφές αυτού του υπολοίπου."
         confirmText="Μηδενισμός" destructive onConfirm={zeroOut}
-      />
-      <ConfirmDialog
-        open={settleOpen}
-        onOpenChange={setSettleOpen}
-        title="Διακανονισμός Βοτανικού;"
-        description="Οι ενεργές εγγραφές Βοτανικού θα αρχειοθετηθούν σε μία εγγραφή αρχείου και το υπόλοιπο θα μηδενιστεί."
-        confirmText="Διακανονισμός" onConfirm={settleBotanicos}
       />
       <ConfirmDialog
         open={!!undoTarget}
