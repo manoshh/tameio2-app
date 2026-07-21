@@ -27,6 +27,11 @@ Safari). Στο `index.html` προστέθηκαν τα αντίστοιχα `<
 έδωσε το ακριβές SVG και το export (512×512, μέσω Photoshop). Τα 192/180
 παράγονται από αυτό με resize.
 
+**Favicon browser:** το `💰` emoji favicon (leftover σχεδιαστική επιλογή,
+όχι από base44) αντικαταστάθηκε με το ίδιο πορτοφολάκι — `public/favicon.svg`
+(vector, ίδιο σχέδιο με το app icon) plus `public/favicon.ico` (16/32/48,
+fallback για παλαιότερους browsers).
+
 ---
 
 ## 2026-07-18 — Αφαίρεση χειροκίνητου διακανονισμού Βοτανικού
