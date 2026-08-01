@@ -59,9 +59,12 @@ const OPERATIONS = {
   // Ο client στέλνει μόνο μετρημένα γεγονότα: το υπόλοιπο του κουτιού και πόσα
   // κατέθεσε πράγματι ο καθένας. Ποτέ υπολογισμένα ποσά — αυτά τα βγάζει ο
   // server από τις εγγραφές της βάσης.
-  async close({ enteredBalance, contributions }) {
+  async close({ enteredBalance, contributions, botanicosAction = 'settled' }) {
     const entered = Number(enteredBalance);
     if (!Number.isFinite(entered)) throw new HttpError(400, 'Μη έγκυρο υπόλοιπο');
+    if (!['settled', 'postpone'].includes(botanicosAction)) {
+      throw new HttpError(400, 'Μη έγκυρη επιλογή για τον Βοτανικό');
+    }
 
     // Προαιρετικά· αν λείπουν, ισχύουν τα υπολογισμένα ποσά.
     const paid = {};
@@ -104,7 +107,7 @@ const OPERATIONS = {
       const { month, year } = period;
 
       // 1) Διακανονισμός Βοτανικού (μετά την τραπεζική μεταφορά)
-      if (botanicosBalance !== 0) {
+      if (botanicosBalance !== 0 && botanicosAction === 'settled') {
         const bp = periodFromEntries(activeBotanicos, fallback);
         const bs = await createBotanicosSettlement(client, { month: bp.month, year: bp.year, balanceBefore: botanicosBalance, timestamp });
         await archiveEntries(client, activeBotanicos.map((e) => e.id), bs.id);

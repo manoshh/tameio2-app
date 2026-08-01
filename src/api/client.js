@@ -64,8 +64,8 @@ export const db = {
 export const settlements = {
   // `contributions` = πόσα κατέθεσε πράγματι ο καθένας ({ manos, eirini }).
   // Αν λείπει, ισχύουν τα ποσά που υπολογίζει ο server.
-  close: (enteredBalance, contributions) =>
-    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions } }),
+  close: (enteredBalance, contributions, botanicosAction = 'settled') =>
+    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions, botanicosAction } }),
   // `args` = { settlementId, person } για αναίρεση ανά πρόσωπο· χωρίς όρισμα
   // αναιρεί ολόκληρο το πιο πρόσφατο κλείσιμο.
   undoClose: (args) => rpc('/api/settlements', { op: 'undoClose', args }),

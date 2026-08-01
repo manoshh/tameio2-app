@@ -1,7 +1,8 @@
 import { Toaster } from '@/components/ui/toaster';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClientInstance } from '@/lib/query-client';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { BrowserRouter as Router, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import PageNotFound from '@/lib/PageNotFound';
 import ScrollToTop from '@/components/ScrollToTop';
 import { PasswordAuthProvider } from '@/lib/passwordAuth';
@@ -16,6 +17,7 @@ function App() {
     <QueryClientProvider client={queryClientInstance}>
       <PasswordAuthProvider>
         <Router>
+          <PendingCloseRedirect />
           <ScrollToTop />
           <Routes>
             {/* Εκτός του Gate: ο χρήστης φτάνει εδώ ακριβώς επειδή δεν μπορεί
@@ -34,6 +36,21 @@ function App() {
       <Toaster />
     </QueryClientProvider>
   );
+}
+
+function PendingCloseRedirect() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (location.pathname === '/close' || location.pathname === '/reset-password') return;
+    try {
+      const pending = JSON.parse(localStorage.getItem('tameio.pendingClose') || 'null');
+      if (pending?.open) navigate('/close', { replace: true });
+    } catch {
+      localStorage.removeItem('tameio.pendingClose');
+    }
+  }, [location.pathname, navigate]);
+  return null;
 }
 
 export default App;

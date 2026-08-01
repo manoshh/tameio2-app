@@ -11,14 +11,29 @@ import { owedInfo } from '@/lib/labels';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { settlements } from '@/api/client';
 
+const PENDING_CLOSE_KEY = 'tameio.pendingClose';
+
+function readPendingClose() {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_CLOSE_KEY) || 'null');
+  } catch {
+    localStorage.removeItem(PENDING_CLOSE_KEY);
+    return null;
+  }
+}
+
 export default function MonthlyClose({ onClosed }) {
+  const pending = useMemo(readPendingClose, []);
   const { toast } = useToast();
   const [settings, setSettings] = useState(null);
   const [entries, setEntries] = useState([]);
-  const [entered, setEntered] = useState('');
-  const [paid, setPaid] = useState({ manos: '', eirini: '' });
+  const [entered, setEntered] = useState(pending?.entered || '');
+  const [paid, setPaid] = useState(pending?.paid || { manos: 0, eirini: 0 });
+  const [depositInput, setDepositInput] = useState(pending?.depositInput || { manos: '0', eirini: '0' });
   const [busy, setBusy] = useState(false);
-  const [settleOpen, setSettleOpen] = useState(false);
+  const [settleOpen, setSettleOpen] = useState(Boolean(pending?.open));
+  const [botanicosAction, setBotanicosAction] = useState(pending?.botanicosAction || null);
+  const [personAction, setPersonAction] = useState(pending?.personAction || { manos: null, eirini: null });
 
   const reload = async () => {
     const [e, s] = await Promise.all([listAllEntries(), getSettings()]);
@@ -42,32 +57,55 @@ export default function MonthlyClose({ onClosed }) {
     [settings, effectiveBalance, manosOwed, eiriniOwed]
   );
 
-  // Τα πεδία κατάθεσης προσυμπληρώνονται με το υπολογισμένο ποσό, και
-  // ξαναγεμίζουν όποτε αυτό αλλάζει (π.χ. διορθώνεις το μετρημένο υπόλοιπο).
+  // Η οφειλόμενη συνεισφορά δεν μηδενίζεται. Μόνο το πεδίο νέας
+  // κατάθεσης ξεκινά από 0. Κάθε OK αφαιρεί το ποσό από το υπόλοιπο.
   const suggestedManos = calc?.manos.contribution;
   const suggestedEirini = calc?.eirini.contribution;
   useEffect(() => {
     if (suggestedManos === undefined) return;
-    setPaid({ manos: String(suggestedManos), eirini: String(suggestedEirini) });
-  }, [suggestedManos, suggestedEirini]);
+    if (settleOpen) return;
+    setPaid({ manos: 0, eirini: 0 });
+    setDepositInput({ manos: '0', eirini: '0' });
+    setPersonAction({ manos: null, eirini: null });
+    setBotanicosAction(null);
+  }, [suggestedManos, suggestedEirini, settleOpen]);
+
+  useEffect(() => {
+    if (!settleOpen) return;
+    localStorage.setItem(PENDING_CLOSE_KEY, JSON.stringify({
+      open: true, entered, paid, depositInput, botanicosAction, personAction,
+    }));
+  }, [settleOpen, entered, paid, depositInput, botanicosAction, personAction]);
 
   // Ό,τι κατατίθεται διαφορετικά από το υπολογισμένο μεταφέρεται στον επόμενο μήνα.
-  const actual = {
-    manos: paid.manos === '' ? (suggestedManos ?? 0) : (parseFloat(paid.manos) || 0),
-    eirini: paid.eirini === '' ? (suggestedEirini ?? 0) : (parseFloat(paid.eirini) || 0),
-  };
+  const actual = paid;
   const final = calc && {
     manos: applyActualContribution(calc.manos, actual.manos),
     eirini: applyActualContribution(calc.eirini, actual.eirini),
   };
 
+  const applyDeposit = (party) => {
+    const amount = round2(parseFloat(depositInput[party]) || 0);
+    const remaining = round2(Math.max(calc[party].contribution - paid[party], 0));
+    if (amount < 0 || amount > remaining) {
+      toast({ title: 'Μη έγκυρο ποσό', description: `Μπορείς να καταχωρίσεις έως ${fmt(remaining)}.`, variant: 'destructive' });
+      return;
+    }
+    const nextPaid = round2(paid[party] + amount);
+    const settled = round2(calc[party].contribution - nextPaid) === 0;
+    setPaid((p) => ({ ...p, [party]: nextPaid }));
+    setDepositInput((p) => ({ ...p, [party]: '0' }));
+    setPersonAction((p) => ({ ...p, [party]: settled ? 'ok' : null }));
+  };
+
   const run = async () => {
-    setSettleOpen(false);
     setBusy(true);
     try {
       // Ο server ξαναϋπολογίζει τα πάντα από τις εγγραφές· εδώ στέλνουμε μόνο
       // μετρημένα γεγονότα: το υπόλοιπο και πόσα κατέθεσε πράγματι ο καθένας.
-      await settlements.close(enteredNum, actual);
+      await settlements.close(enteredNum, actual, botanicosAction || 'settled');
+      localStorage.removeItem(PENDING_CLOSE_KEY);
+      setSettleOpen(false);
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       await reload();
       setEntered('');
@@ -77,6 +115,15 @@ export default function MonthlyClose({ onClosed }) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const cancelClose = () => {
+    localStorage.removeItem(PENDING_CLOSE_KEY);
+    setSettleOpen(false);
+    setPaid({ manos: 0, eirini: 0 });
+    setDepositInput({ manos: '0', eirini: '0' });
+    setPersonAction({ manos: null, eirini: null });
+    setBotanicosAction(null);
   };
 
   if (!settings || !calc) return <div className="py-10 text-center text-stone-400">Φόρτωση...</div>;
@@ -125,16 +172,10 @@ export default function MonthlyClose({ onClosed }) {
               <PersonResult
                 party="manos"
                 computed={calc.manos}
-                result={final.manos}
-                value={paid.manos}
-                onChange={(v) => setPaid((p) => ({ ...p, manos: v }))}
               />
               <PersonResult
                 party="eirini"
                 computed={calc.eirini}
-                result={final.eirini}
-                value={paid.eirini}
-                onChange={(v) => setPaid((p) => ({ ...p, eirini: v }))}
               />
             </div>
             <Button className="w-full mt-3 bg-emerald-700 hover:bg-emerald-800" disabled={busy || !entered} onClick={() => setSettleOpen(true)}>
@@ -144,8 +185,8 @@ export default function MonthlyClose({ onClosed }) {
         </Card>
       </div>
 
-      <Dialog open={settleOpen} onOpenChange={setSettleOpen}>
-        <DialogContent>
+      <Dialog open={settleOpen} onOpenChange={() => {}}>
+        <DialogContent hideClose onEscapeKeyDown={(e) => e.preventDefault()} onPointerDownOutside={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
           <DialogHeader>
             <DialogTitle>Επιβεβαίωση κλεισίματος</DialogTitle>
           </DialogHeader>
@@ -155,14 +196,29 @@ export default function MonthlyClose({ onClosed }) {
                 <p className="font-medium text-amber-900">
                   {botanicosInfo.label}: {fmt(botanicosInfo.amount)}
                 </p>
-                <p className="text-amber-800 text-xs">Κάνε πρώτα την τραπεζική μεταφορά και μετά επιβεβαίωσε.</p>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button type="button" size="sm" variant={botanicosAction === 'postpone' ? 'default' : 'outline'} onClick={() => setBotanicosAction('postpone')}>Postpone</Button>
+                  <Button type="button" size="sm" variant={botanicosAction === 'settled' ? 'default' : 'outline'} onClick={() => setBotanicosAction('settled')}>Τακτοποιήθηκε</Button>
+                </div>
               </div>
             )}
-            <div className="bg-stone-50 rounded-lg p-3 space-y-2">
-              <SummaryRow label="Ο Μάνος καταθέτει" value={fmt(actual.manos)} />
-              <SummaryRow label="Η Ειρήνη καταθέτει" value={fmt(actual.eirini)} />
+            <div className="bg-stone-50 rounded-lg p-3 space-y-3">
+              {['manos', 'eirini'].map((party) => (
+                <DepositDecision
+                  key={party}
+                  party={party}
+                  due={calc[party].contribution}
+                  paid={paid[party]}
+                  value={depositInput[party]}
+                  action={personAction[party]}
+                  onChange={(value) => setDepositInput((p) => ({ ...p, [party]: value }))}
+                  onClear={() => setDepositInput((p) => ({ ...p, [party]: '0' }))}
+                  onOk={() => applyDeposit(party)}
+                  onPostpone={() => setPersonAction((p) => ({ ...p, [party]: 'postpone' }))}
+                />
+              ))}
               <div className="pt-2 border-t border-stone-200">
-                <SummaryRow label="Το κουτί γίνεται" value={fmt(round2(effectiveBalance + actual.manos + actual.eirini))} strong />
+                <SummaryRow label="Τραπεζικό υπόλοιπο μετά" value={fmt(round2(enteredNum + (botanicosAction === 'settled' ? -botanicosBal : 0) + actual.manos + actual.eirini))} strong />
               </div>
             </div>
             {(final.manos.owedAfter !== 0 || final.eirini.owedAfter !== 0) && (
@@ -174,8 +230,8 @@ export default function MonthlyClose({ onClosed }) {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSettleOpen(false)}>Άκυρο</Button>
-            <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy} onClick={run}>Επιβεβαίωση</Button>
+            <Button variant="outline" onClick={cancelClose}>Cancel</Button>
+            <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy || (botanicosBal !== 0 && !botanicosAction) || !personAction.manos || !personAction.eirini} onClick={run}>Επιβεβαίωση</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -225,38 +281,46 @@ function CarryLine({ party, value }) {
   );
 }
 
-function PersonResult({ party, computed, result, value, onChange }) {
-  const after = owedInfo(party, result.owedAfter);
-  const diff = round2(result.contribution - computed.contribution);
+function DepositDecision({ party, due, paid, value, action, onChange, onClear, onOk, onPostpone }) {
+  const info = owedInfo(party, 0);
+  const remaining = round2(Math.max(due - paid, 0));
+  const enteredAmount = round2(parseFloat(value) || 0);
+  const settlesExactly = remaining > 0 && enteredAmount === remaining;
+  return (
+    <div className="space-y-2 border-b border-stone-200 pb-3 last:border-0">
+      <div className="flex justify-between gap-3">
+        <Label>{info.party.subject} κατέθεσε</Label>
+        <span className="text-xs text-stone-500">Αρχικό: {fmt(due)}</span>
+      </div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Input type="number" step="0.01" min="0" value={value} onChange={(e) => onChange(e.target.value)} className="bg-white tabular-nums" />
+        <Button type="button" size="sm" variant="outline" onClick={onClear}>Clear</Button>
+        <Button type="button" size="sm" variant={action === 'ok' ? 'default' : 'outline'} onClick={onOk}>{settlesExactly || action === 'ok' ? 'Τακτοποιήθηκε' : 'OK'}</Button>
+        <Button type="button" size="sm" variant={action === 'postpone' ? 'default' : 'outline'} onClick={onPostpone}>Postpone</Button>
+      </div>
+      <div className="flex justify-between text-xs">
+        <span className="text-stone-500">{action === 'postpone' ? 'Μεταφέρεται' : 'Υπόλοιπο'}</span>
+        <span className="font-semibold tabular-nums text-stone-800">{fmt(remaining)}</span>
+      </div>
+    </div>
+  );
+}
+
+function PersonResult({ party, computed }) {
+  const info = owedInfo(party, 0);
 
   return (
-    <div className={`rounded-lg border p-3 space-y-2 ${after.party.card}`}>
+    <div className={`rounded-lg border p-3 space-y-2 ${info.party.card}`}>
       <div className="flex items-center justify-between">
-        <span className="font-medium text-stone-800">{after.party.name}</span>
+        <span className="font-medium text-stone-800">{info.party.name}</span>
         {computed.offset !== 0 && (
           <span className="text-xs text-stone-500">συμψηφισμός {fmt(computed.offset)}</span>
         )}
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs text-stone-500">Καταθέτει (€)</Label>
-        <Input
-          type="number"
-          step="0.01"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="bg-white tabular-nums"
-        />
-        {diff !== 0 && (
-          <p className="text-xs text-stone-400">
-            Υπολογισμένο: {fmt(computed.contribution)} · {diff > 0 ? 'παραπάνω' : 'λιγότερα'} κατά {fmt(Math.abs(diff))}
-          </p>
-        )}
-      </div>
-
-      <div className="flex justify-between text-xs pt-1 border-t border-stone-200">
-        <span className="text-stone-500">{after.label} (μετά)</span>
-        <span className={`tabular-nums font-semibold ${after.colorClass}`}>{fmt(after.amount)}</span>
+      <div className="flex justify-between text-sm pt-1 border-t border-stone-200">
+        <span className="text-stone-500">Καταθέτει</span>
+        <span className="tabular-nums font-semibold text-stone-900">{fmt(computed.contribution)}</span>
       </div>
     </div>
   );
