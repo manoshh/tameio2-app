@@ -53,7 +53,48 @@ async function createBotanicosSettlement(client, { month, year, balanceBefore, t
   return deserializeRow(ENTITIES.BotanicosSettlement, rows[0]);
 }
 
+async function ensureCloseDraftTable(client) {
+  // Αμυντικά και στο runtime, ώστε το deploy να μη μείνει σπασμένο αν η
+  // migration τρέξει λίγο αργότερα. Το schema παραμένει η κανονική πηγή.
+  await client.query(`create table if not exists close_draft (
+    key text primary key check (key = 'current'),
+    state jsonb not null,
+    updated_date timestamptz not null default now()
+  )`);
+}
+
 const OPERATIONS = {
+  async getCloseDraft() {
+    return transaction(async (client) => {
+      await ensureCloseDraftTable(client);
+      const { rows } = await client.query("select state, updated_date from close_draft where key = 'current'");
+      return { draft: rows[0]?.state || null, updatedAt: rows[0]?.updated_date || null };
+    });
+  },
+
+  async saveCloseDraft({ state }) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)) throw new HttpError(400, 'Μη έγκυρο πρόχειρο κλείσιμο');
+    const serialized = JSON.stringify(state);
+    if (serialized.length > 10000) throw new HttpError(400, 'Το πρόχειρο κλείσιμο είναι πολύ μεγάλο');
+    return transaction(async (client) => {
+      await ensureCloseDraftTable(client);
+      await client.query(
+        `insert into close_draft (key, state) values ('current', $1::jsonb)
+         on conflict (key) do update set state = excluded.state, updated_date = now()`,
+        [serialized]
+      );
+      return { saved: true };
+    });
+  },
+
+  async cancelCloseDraft() {
+    return transaction(async (client) => {
+      await ensureCloseDraftTable(client);
+      await client.query("delete from close_draft where key = 'current'");
+      return { cancelled: true };
+    });
+  },
+
   // Κλείσιμο μήνα.
   //
   // Ο client στέλνει μόνο μετρημένα γεγονότα: το υπόλοιπο του κουτιού και πόσα
@@ -147,6 +188,10 @@ const OPERATIONS = {
           [person, result.owedAfter, label, today, settlement.id]
         );
       }
+
+      // Το κλείσιμο και η διαγραφή του προχείρου είναι μία ατομική πράξη.
+      await ensureCloseDraftTable(client);
+      await client.query("delete from close_draft where key = 'current'");
 
       // Τα νέα υπόλοιπα δεν χρειάζεται να αποθηκευτούν: προκύπτουν από τις
       // εγγραφές — οι παλιές αρχειοθετήθηκαν, τα carry-over είναι ό,τι μένει.

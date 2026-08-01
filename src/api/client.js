@@ -66,6 +66,9 @@ export const settlements = {
   // Αν λείπει, ισχύουν τα ποσά που υπολογίζει ο server.
   close: (enteredBalance, contributions, botanicosAction = 'settled') =>
     rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions, botanicosAction } }),
+  getCloseDraft: () => rpc('/api/settlements', { op: 'getCloseDraft' }),
+  saveCloseDraft: (state) => rpc('/api/settlements', { op: 'saveCloseDraft', args: { state } }),
+  cancelCloseDraft: () => rpc('/api/settlements', { op: 'cancelCloseDraft' }),
   // `args` = { settlementId, person } για αναίρεση ανά πρόσωπο· χωρίς όρισμα
   // αναιρεί ολόκληρο το πιο πρόσφατο κλείσιμο.
   undoClose: (args) => rpc('/api/settlements', { op: 'undoClose', args }),

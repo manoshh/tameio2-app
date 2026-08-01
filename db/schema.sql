@@ -38,6 +38,14 @@ create table if not exists login_attempt (
 
 create index if not exists login_attempt_updated_idx on login_attempt (updated_date);
 
+-- Κοινό πρόχειρο μηνιαίου κλεισίματος. Μία μόνο γραμμή, ώστε κινητό και
+-- υπολογιστής να συνεχίζουν την ίδια διαδικασία.
+create table if not exists close_draft (
+  key          text primary key check (key = 'current'),
+  state        jsonb not null,
+  updated_date timestamptz not null default now()
+);
+
 -- Ρυθμίσεις της εφαρμογής. Μία γραμμή.
 --
 -- Κρατάει ΜΟΝΟ πραγματικές ρυθμίσεις. Τα υπόλοιπα (τι χρωστάει ο καθένας, τι ο

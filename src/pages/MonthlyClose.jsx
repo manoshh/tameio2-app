@@ -11,29 +11,20 @@ import { owedInfo } from '@/lib/labels';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { settlements } from '@/api/client';
 
-const PENDING_CLOSE_KEY = 'tameio.pendingClose';
-
-function readPendingClose() {
-  try {
-    return JSON.parse(localStorage.getItem(PENDING_CLOSE_KEY) || 'null');
-  } catch {
-    localStorage.removeItem(PENDING_CLOSE_KEY);
-    return null;
-  }
-}
+const LEGACY_PENDING_CLOSE_KEY = 'tameio.pendingClose';
 
 export default function MonthlyClose({ onClosed }) {
-  const pending = useMemo(readPendingClose, []);
   const { toast } = useToast();
   const [settings, setSettings] = useState(null);
   const [entries, setEntries] = useState([]);
-  const [entered, setEntered] = useState(pending?.entered || '');
-  const [paid, setPaid] = useState(pending?.paid || { manos: 0, eirini: 0 });
-  const [depositInput, setDepositInput] = useState(pending?.depositInput || { manos: '0', eirini: '0' });
+  const [entered, setEntered] = useState('');
+  const [paid, setPaid] = useState({ manos: 0, eirini: 0 });
+  const [depositInput, setDepositInput] = useState({ manos: '0', eirini: '0' });
   const [busy, setBusy] = useState(false);
-  const [settleOpen, setSettleOpen] = useState(Boolean(pending?.open));
-  const [botanicosAction, setBotanicosAction] = useState(pending?.botanicosAction || null);
-  const [personAction, setPersonAction] = useState(pending?.personAction || { manos: null, eirini: null });
+  const [settleOpen, setSettleOpen] = useState(false);
+  const [botanicosAction, setBotanicosAction] = useState(null);
+  const [personAction, setPersonAction] = useState({ manos: null, eirini: null });
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   const reload = async () => {
     const [e, s] = await Promise.all([listAllEntries(), getSettings()]);
@@ -41,6 +32,35 @@ export default function MonthlyClose({ onClosed }) {
   };
 
   useEffect(() => { reload(); }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadDraft = async () => {
+      try {
+        const response = await settlements.getCloseDraft();
+        let draft = response.draft;
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_PENDING_CLOSE_KEY) || 'null');
+        if (!draft && legacy?.open) {
+          await settlements.saveCloseDraft(legacy);
+          draft = legacy;
+        }
+        localStorage.removeItem(LEGACY_PENDING_CLOSE_KEY);
+        if (!active || !draft?.open) return;
+        setEntered(draft.entered || '');
+        setPaid(draft.paid || { manos: 0, eirini: 0 });
+        setDepositInput(draft.depositInput || { manos: '0', eirini: '0' });
+        setBotanicosAction(draft.botanicosAction || null);
+        setPersonAction(draft.personAction || { manos: null, eirini: null });
+        setSettleOpen(true);
+      } catch (err) {
+        if (active) toast({ title: 'Δεν φορτώθηκε το εκκρεμές κλείσιμο', description: err.message, variant: 'destructive' });
+      } finally {
+        if (active) setDraftLoaded(true);
+      }
+    };
+    loadDraft();
+    return () => { active = false; };
+  }, [toast]);
 
   const manosOwed = sumActive(entries, (e) => e.person === 'manos' && e.module === 'person');
   const eiriniOwed = sumActive(entries, (e) => e.person === 'eirini' && e.module === 'person');
@@ -63,19 +83,23 @@ export default function MonthlyClose({ onClosed }) {
   const suggestedEirini = calc?.eirini.contribution;
   useEffect(() => {
     if (suggestedManos === undefined) return;
+    if (!draftLoaded) return;
     if (settleOpen) return;
     setPaid({ manos: 0, eirini: 0 });
     setDepositInput({ manos: '0', eirini: '0' });
     setPersonAction({ manos: null, eirini: null });
     setBotanicosAction(null);
-  }, [suggestedManos, suggestedEirini, settleOpen]);
+  }, [suggestedManos, suggestedEirini, settleOpen, draftLoaded]);
 
   useEffect(() => {
-    if (!settleOpen) return;
-    localStorage.setItem(PENDING_CLOSE_KEY, JSON.stringify({
-      open: true, entered, paid, depositInput, botanicosAction, personAction,
-    }));
-  }, [settleOpen, entered, paid, depositInput, botanicosAction, personAction]);
+    if (!draftLoaded || !settleOpen) return;
+    const timer = window.setTimeout(() => {
+      settlements.saveCloseDraft({
+        open: true, entered, paid, depositInput, botanicosAction, personAction,
+      }).catch((err) => toast({ title: 'Δεν αποθηκεύτηκε το κλείσιμο', description: err.message, variant: 'destructive' }));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [draftLoaded, settleOpen, entered, paid, depositInput, botanicosAction, personAction, toast]);
 
   // Ό,τι κατατίθεται διαφορετικά από το υπολογισμένο μεταφέρεται στον επόμενο μήνα.
   const actual = paid;
@@ -104,7 +128,6 @@ export default function MonthlyClose({ onClosed }) {
       // Ο server ξαναϋπολογίζει τα πάντα από τις εγγραφές· εδώ στέλνουμε μόνο
       // μετρημένα γεγονότα: το υπόλοιπο και πόσα κατέθεσε πράγματι ο καθένας.
       await settlements.close(enteredNum, actual, botanicosAction || 'settled');
-      localStorage.removeItem(PENDING_CLOSE_KEY);
       setSettleOpen(false);
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       await reload();
@@ -117,13 +140,20 @@ export default function MonthlyClose({ onClosed }) {
     }
   };
 
-  const cancelClose = () => {
-    localStorage.removeItem(PENDING_CLOSE_KEY);
-    setSettleOpen(false);
-    setPaid({ manos: 0, eirini: 0 });
-    setDepositInput({ manos: '0', eirini: '0' });
-    setPersonAction({ manos: null, eirini: null });
-    setBotanicosAction(null);
+  const cancelClose = async () => {
+    setBusy(true);
+    try {
+      await settlements.cancelCloseDraft();
+      setSettleOpen(false);
+      setPaid({ manos: 0, eirini: 0 });
+      setDepositInput({ manos: '0', eirini: '0' });
+      setPersonAction({ manos: null, eirini: null });
+      setBotanicosAction(null);
+    } catch (err) {
+      toast({ title: 'Δεν ακυρώθηκε το κλείσιμο', description: err.message, variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!settings || !calc) return <div className="py-10 text-center text-stone-400">Φόρτωση...</div>;
@@ -234,7 +264,7 @@ export default function MonthlyClose({ onClosed }) {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={cancelClose}>Cancel</Button>
+            <Button variant="outline" disabled={busy} onClick={cancelClose}>Cancel</Button>
             <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy || (botanicosBal !== 0 && !botanicosAction) || !personAction.manos || !personAction.eirini} onClick={run}>Επιβεβαίωση</Button>
           </DialogFooter>
         </DialogContent>

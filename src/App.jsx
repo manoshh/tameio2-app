@@ -11,6 +11,7 @@ import Layout from '@/components/Layout';
 import Treasury from '@/pages/Treasury';
 import Close from '@/pages/Close';
 import ResetPassword from '@/pages/ResetPassword';
+import { settlements } from '@/api/client';
 
 function App() {
   return (
@@ -43,12 +44,25 @@ function PendingCloseRedirect() {
   const navigate = useNavigate();
   useEffect(() => {
     if (location.pathname === '/close' || location.pathname === '/reset-password') return;
-    try {
-      const pending = JSON.parse(localStorage.getItem('tameio.pendingClose') || 'null');
-      if (pending?.open) navigate('/close', { replace: true });
-    } catch {
-      localStorage.removeItem('tameio.pendingClose');
-    }
+    let active = true;
+    const check = async () => {
+      try {
+        let { draft } = await settlements.getCloseDraft();
+        // Μία φορά migration για πρόχειρο που είχε αποθηκευτεί μόνο στον browser.
+        const localDraft = JSON.parse(localStorage.getItem('tameio.pendingClose') || 'null');
+        if (!draft && localDraft?.open) {
+          await settlements.saveCloseDraft(localDraft);
+          draft = localDraft;
+        }
+        localStorage.removeItem('tameio.pendingClose');
+        if (active && draft?.open) navigate('/close', { replace: true });
+      } catch {
+        // Πιθανό 401 πριν ολοκληρωθεί το login· η επόμενη δοκιμή θα το βρει.
+      }
+    };
+    check();
+    const timer = window.setInterval(check, 5000);
+    return () => { active = false; window.clearInterval(timer); };
   }, [location.pathname, navigate]);
   return null;
 }
