@@ -43,6 +43,7 @@ create index if not exists login_attempt_updated_idx on login_attempt (updated_d
 create table if not exists close_draft (
   key          text primary key check (key = 'current'),
   state        jsonb not null,
+  revision     bigint not null default 1,
   updated_date timestamptz not null default now()
 );
 
@@ -66,6 +67,7 @@ alter table settings drop column if exists "botanicosBalance";
 
 create table if not exists settlement (
   id                      uuid primary key default gen_random_uuid(),
+  "operationId"           text unique,
   month                   integer not null check (month between 1 and 12),
   year                    integer not null,
   "enteredBalance"        numeric(12,2) not null default 0,

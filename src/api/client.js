@@ -64,10 +64,10 @@ export const db = {
 export const settlements = {
   // `contributions` = πόσα κατέθεσε πράγματι ο καθένας ({ manos, eirini }).
   // Αν λείπει, ισχύουν τα ποσά που υπολογίζει ο server.
-  close: (enteredBalance, contributions, botanicosAction = 'settled') =>
-    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions, botanicosAction } }),
+  close: (enteredBalance, contributions, botanicosAction = 'settled', operationId) =>
+    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions, botanicosAction, operationId } }),
   getCloseDraft: () => rpc('/api/settlements', { op: 'getCloseDraft' }),
-  saveCloseDraft: (state) => rpc('/api/settlements', { op: 'saveCloseDraft', args: { state } }),
+  saveCloseDraft: (state, expectedRevision = 0) => rpc('/api/settlements', { op: 'saveCloseDraft', args: { state, expectedRevision } }),
   cancelCloseDraft: () => rpc('/api/settlements', { op: 'cancelCloseDraft' }),
   // `args` = { settlementId, person } για αναίρεση ανά πρόσωπο· χωρίς όρισμα
   // αναιρεί ολόκληρο το πιο πρόσφατο κλείσιμο.

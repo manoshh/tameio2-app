@@ -59,31 +59,44 @@ async function ensureCloseDraftTable(client) {
   await client.query(`create table if not exists close_draft (
     key text primary key check (key = 'current'),
     state jsonb not null,
+    revision bigint not null default 1,
     updated_date timestamptz not null default now()
   )`);
+  await client.query('alter table close_draft add column if not exists revision bigint not null default 1');
+}
+
+async function ensureSettlementOperationId(client) {
+  await client.query('alter table settlement add column if not exists "operationId" text');
+  await client.query('create unique index if not exists settlement_operation_id_idx on settlement ("operationId") where "operationId" is not null');
 }
 
 const OPERATIONS = {
   async getCloseDraft() {
     return transaction(async (client) => {
       await ensureCloseDraftTable(client);
-      const { rows } = await client.query("select state, updated_date from close_draft where key = 'current'");
-      return { draft: rows[0]?.state || null, updatedAt: rows[0]?.updated_date || null };
+      const { rows } = await client.query("select state, revision, updated_date from close_draft where key = 'current'");
+      return { draft: rows[0]?.state || null, revision: Number(rows[0]?.revision || 0), updatedAt: rows[0]?.updated_date || null };
     });
   },
 
-  async saveCloseDraft({ state }) {
+  async saveCloseDraft({ state, expectedRevision = 0 }) {
     if (!state || typeof state !== 'object' || Array.isArray(state)) throw new HttpError(400, 'Μη έγκυρο πρόχειρο κλείσιμο');
     const serialized = JSON.stringify(state);
     if (serialized.length > 10000) throw new HttpError(400, 'Το πρόχειρο κλείσιμο είναι πολύ μεγάλο');
     return transaction(async (client) => {
       await ensureCloseDraftTable(client);
+      const { rows } = await client.query("select revision from close_draft where key = 'current' for update");
+      const currentRevision = Number(rows[0]?.revision || 0);
+      if (Number(expectedRevision) !== currentRevision) {
+        throw new HttpError(409, 'Το κλείσιμο άλλαξε από άλλη συσκευή');
+      }
+      const nextRevision = currentRevision + 1;
       await client.query(
-        `insert into close_draft (key, state) values ('current', $1::jsonb)
-         on conflict (key) do update set state = excluded.state, updated_date = now()`,
-        [serialized]
+        `insert into close_draft (key, state, revision) values ('current', $1::jsonb, $2)
+         on conflict (key) do update set state = excluded.state, revision = excluded.revision, updated_date = now()`,
+        [serialized, nextRevision]
       );
-      return { saved: true };
+      return { saved: true, revision: nextRevision };
     });
   },
 
@@ -100,7 +113,7 @@ const OPERATIONS = {
   // Ο client στέλνει μόνο μετρημένα γεγονότα: το υπόλοιπο του κουτιού και πόσα
   // κατέθεσε πράγματι ο καθένας. Ποτέ υπολογισμένα ποσά — αυτά τα βγάζει ο
   // server από τις εγγραφές της βάσης.
-  async close({ enteredBalance, contributions, botanicosAction = 'settled' }) {
+  async close({ enteredBalance, contributions, botanicosAction = 'settled', operationId }) {
     const entered = Number(enteredBalance);
     if (!Number.isFinite(entered)) throw new HttpError(400, 'Μη έγκυρο υπόλοιπο');
     if (!['settled', 'postpone'].includes(botanicosAction)) {
@@ -118,6 +131,11 @@ const OPERATIONS = {
     }
 
     return transaction(async (client) => {
+      await ensureSettlementOperationId(client);
+      if (operationId) {
+        const { rows: existing } = await client.query('select * from settlement where "operationId" = $1', [operationId]);
+        if (existing[0]) return { settlement: deserializeRow(ENTITIES.Settlement, existing[0]), duplicate: true };
+      }
       const settings = await loadSettings(client);
       const entries = await loadEntries(client);
 
@@ -157,13 +175,13 @@ const OPERATIONS = {
       // 2) Στιγμιότυπο διακανονισμού ατόμων
       const { rows } = await client.query(
         `insert into settlement (
-           month, year, "enteredBalance", "targetReserve", "refillAmount", "shareEach",
+           month, year, "operationId", "enteredBalance", "targetReserve", "refillAmount", "shareEach",
            "manosOwedBefore", "manosOwedAfter", "manosOffset", "manosContribution",
            "eiriniOwedBefore", "eiriniOwedAfter", "eiriniOffset", "eiriniContribution",
            "botanicosBalanceBefore", "timestamp"
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`,
+         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning *`,
         [
-          month, year, calc.enteredBalance, calc.targetReserve, calc.refillAmount, calc.shareEach,
+          month, year, operationId || null, calc.enteredBalance, calc.targetReserve, calc.refillAmount, calc.shareEach,
           calc.manos.owedBefore, calc.manos.owedAfter, calc.manos.offset, calc.manos.contribution,
           calc.eirini.owedBefore, calc.eirini.owedAfter, calc.eirini.offset, calc.eirini.contribution,
           botanicosBalance, timestamp,

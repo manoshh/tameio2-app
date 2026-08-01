@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +28,25 @@ export default function MonthlyClose({ onClosed }) {
   const [personAction, setPersonAction] = useState({ manos: null, eirini: null });
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pendingClear, setPendingClear] = useState(null);
+  const [operationId, setOperationId] = useState(null);
+  const [remoteConflict, setRemoteConflict] = useState(null);
+  const [saveNonce, setSaveNonce] = useState(0);
+  const draftRevision = useRef(0);
+  const savingDraft = useRef(false);
+
+  const applyDraft = (draft) => {
+    setEntered(draft.entered || '');
+    setPaid(draft.paid || { manos: 0, eirini: 0 });
+    setDepositHistory(draft.depositHistory || {
+      manos: draft.paid?.manos ? [{ amount: draft.paid.manos, remaining: null }] : [],
+      eirini: draft.paid?.eirini ? [{ amount: draft.paid.eirini, remaining: null }] : [],
+    });
+    setDepositInput(draft.depositInput || { manos: '0', eirini: '0' });
+    setBotanicosAction(draft.botanicosAction || null);
+    setPersonAction(draft.personAction || { manos: null, eirini: null });
+    setOperationId(draft.operationId || crypto.randomUUID());
+    setSettleOpen(true);
+  };
 
   const reload = async () => {
     const [e, s] = await Promise.all([listAllEntries(), getSettings()]);
@@ -40,25 +59,18 @@ export default function MonthlyClose({ onClosed }) {
     let active = true;
     const loadDraft = async () => {
       try {
-        const response = await settlements.getCloseDraft();
+        let response = await settlements.getCloseDraft();
         let draft = response.draft;
         const legacy = JSON.parse(localStorage.getItem(LEGACY_PENDING_CLOSE_KEY) || 'null');
         if (!draft && legacy?.open) {
-          await settlements.saveCloseDraft(legacy);
+          const saved = await settlements.saveCloseDraft(legacy, 0);
           draft = legacy;
+          response = { ...response, revision: saved.revision };
         }
         localStorage.removeItem(LEGACY_PENDING_CLOSE_KEY);
         if (!active || !draft?.open) return;
-        setEntered(draft.entered || '');
-        setPaid(draft.paid || { manos: 0, eirini: 0 });
-        setDepositHistory(draft.depositHistory || {
-          manos: draft.paid?.manos ? [{ amount: draft.paid.manos, remaining: null }] : [],
-          eirini: draft.paid?.eirini ? [{ amount: draft.paid.eirini, remaining: null }] : [],
-        });
-        setDepositInput(draft.depositInput || { manos: '0', eirini: '0' });
-        setBotanicosAction(draft.botanicosAction || null);
-        setPersonAction(draft.personAction || { manos: null, eirini: null });
-        setSettleOpen(true);
+        draftRevision.current = response.revision || 0;
+        applyDraft(draft);
       } catch (err) {
         if (active) toast({ title: 'Δεν φορτώθηκε το εκκρεμές κλείσιμο', description: err.message, variant: 'destructive' });
       } finally {
@@ -102,13 +114,38 @@ export default function MonthlyClose({ onClosed }) {
   useEffect(() => {
     if (!draftLoaded || !settleOpen) return;
     const timer = window.setTimeout(() => {
+      savingDraft.current = true;
       settlements.saveCloseDraft({
-        open: true, entered, paid, depositHistory, depositInput, botanicosAction, personAction,
+        open: true, entered, paid, depositHistory, depositInput, botanicosAction, personAction, operationId,
         manosDue: suggestedManos, eiriniDue: suggestedEirini,
-      }).catch((err) => toast({ title: 'Δεν αποθηκεύτηκε το κλείσιμο', description: err.message, variant: 'destructive' }));
+      }, draftRevision.current).then((result) => {
+        draftRevision.current = result.revision;
+      }).catch(async (err) => {
+        if (err.status === 409) {
+          const latest = await settlements.getCloseDraft();
+          setRemoteConflict(latest);
+        } else {
+          toast({ title: 'Δεν αποθηκεύτηκε το κλείσιμο', description: err.message, variant: 'destructive' });
+        }
+      }).finally(() => { savingDraft.current = false; });
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [draftLoaded, settleOpen, entered, paid, depositHistory, depositInput, botanicosAction, personAction, suggestedManos, suggestedEirini, toast]);
+  }, [draftLoaded, settleOpen, entered, paid, depositHistory, depositInput, botanicosAction, personAction, operationId, suggestedManos, suggestedEirini, saveNonce, toast]);
+
+  useEffect(() => {
+    if (!draftLoaded || !settleOpen) return;
+    const check = async () => {
+      if (savingDraft.current || remoteConflict) return;
+      try {
+        const latest = await settlements.getCloseDraft();
+        if (latest.draft?.open && latest.revision > draftRevision.current) setRemoteConflict(latest);
+      } catch {
+        // Η αποθήκευση θα εμφανίσει το σφάλμα αν υπάρχει πρόβλημα σύνδεσης.
+      }
+    };
+    const timer = window.setInterval(check, 3000);
+    return () => window.clearInterval(timer);
+  }, [draftLoaded, settleOpen, remoteConflict]);
 
   // Ό,τι κατατίθεται διαφορετικά από το υπολογισμένο μεταφέρεται στον επόμενο μήνα.
   const actual = paid;
@@ -116,6 +153,9 @@ export default function MonthlyClose({ onClosed }) {
     manos: applyActualContribution(calc.manos, actual.manos),
     eirini: applyActualContribution(calc.eirini, actual.eirini),
   };
+  const hasPostponed = (botanicosAction === 'postpone' && botanicosBal !== 0)
+    || (personAction.manos === 'postpone' && final?.manos.owedAfter !== 0)
+    || (personAction.eirini === 'postpone' && final?.eirini.owedAfter !== 0);
 
   const applyDeposit = (party) => {
     const amount = round2(parseFloat(depositInput[party]) || 0);
@@ -142,7 +182,7 @@ export default function MonthlyClose({ onClosed }) {
     try {
       // Ο server ξαναϋπολογίζει τα πάντα από τις εγγραφές· εδώ στέλνουμε μόνο
       // μετρημένα γεγονότα: το υπόλοιπο και πόσα κατέθεσε πράγματι ο καθένας.
-      await settlements.close(enteredNum, actual, botanicosAction || 'settled');
+      await settlements.close(enteredNum, actual, botanicosAction || 'settled', operationId);
       setSettleOpen(false);
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       await reload();
@@ -165,6 +205,7 @@ export default function MonthlyClose({ onClosed }) {
       setDepositInput({ manos: '0', eirini: '0' });
       setPersonAction({ manos: null, eirini: null });
       setBotanicosAction(null);
+      setOperationId(null);
     } catch (err) {
       toast({ title: 'Δεν ακυρώθηκε το κλείσιμο', description: err.message, variant: 'destructive' });
     } finally {
@@ -178,6 +219,25 @@ export default function MonthlyClose({ onClosed }) {
     setDepositInput((p) => ({ ...p, [party]: '0' }));
     setPersonAction((p) => ({ ...p, [party]: null }));
     setPendingClear(null);
+  };
+
+  const beginClose = () => {
+    setOperationId((current) => current || crypto.randomUUID());
+    setSettleOpen(true);
+  };
+
+  const loadRemoteDraft = () => {
+    if (!remoteConflict?.draft) return;
+    draftRevision.current = remoteConflict.revision;
+    applyDraft(remoteConflict.draft);
+    setRemoteConflict(null);
+  };
+
+  const keepLocalDraft = () => {
+    if (!remoteConflict) return;
+    draftRevision.current = remoteConflict.revision;
+    setRemoteConflict(null);
+    setSaveNonce((n) => n + 1);
   };
 
   if (!settings || !calc) return <div className="py-10 text-center text-stone-400">Φόρτωση...</div>;
@@ -232,7 +292,7 @@ export default function MonthlyClose({ onClosed }) {
                 computed={calc.eirini}
               />
             </div>
-            <Button className="w-full mt-3 bg-emerald-700 hover:bg-emerald-800" disabled={busy || !entered} onClick={() => setSettleOpen(true)}>
+            <Button className="w-full mt-3 bg-emerald-700 hover:bg-emerald-800" disabled={busy || !entered} onClick={beginClose}>
               {busy ? 'Επεξεργασία...' : 'Κλείσιμο & αρχειοθέτηση'}
             </Button>
           </CardContent>
@@ -246,13 +306,14 @@ export default function MonthlyClose({ onClosed }) {
           </DialogHeader>
           <div className="space-y-3 text-sm text-stone-700">
             {botanicosBal !== 0 && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-1">
-                <p className="font-medium text-amber-900">
+              <div className={`rounded-lg border p-3 space-y-1 transition-colors ${botanicosAction ? 'border-stone-200 bg-stone-200/80' : 'border-amber-300 bg-amber-50'}`}>
+                <p className={`font-medium ${botanicosAction ? 'text-stone-500 opacity-20 grayscale' : 'text-amber-900'}`}>
                   {botanicosInfo.label}: {fmt(botanicosInfo.amount)}
                 </p>
                 <div className="flex flex-wrap gap-2 pt-2">
-                  <Button type="button" size="sm" variant={botanicosAction === 'postpone' ? 'default' : 'outline'} onClick={() => setBotanicosAction('postpone')}>Postpone</Button>
-                  <Button type="button" size="sm" variant={botanicosAction === 'settled' ? 'default' : 'outline'} onClick={() => setBotanicosAction('settled')}>Τακτοποιήθηκε</Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => setBotanicosAction(null)}>Clear</Button>
+                  <Button disabled={!!botanicosAction} type="button" size="sm" variant={botanicosAction === 'postpone' ? 'default' : 'outline'} className={botanicosAction ? 'opacity-20 grayscale' : ''} onClick={() => setBotanicosAction('postpone')}>Postpone</Button>
+                  <Button disabled={!!botanicosAction} type="button" size="sm" variant={botanicosAction === 'settled' ? 'default' : 'outline'} className={botanicosAction ? 'opacity-20 grayscale' : ''} onClick={() => setBotanicosAction('settled')}>Τακτοποιήθηκε</Button>
                 </div>
               </div>
             )}
@@ -276,11 +337,12 @@ export default function MonthlyClose({ onClosed }) {
                 <SummaryRow label="Τραπεζικό υπόλοιπο μετά" value={fmt(round2(enteredNum + (botanicosAction === 'settled' ? -botanicosBal : 0) + actual.manos + actual.eirini))} strong />
               </div>
             </div>
-            {(final.manos.owedAfter !== 0 || final.eirini.owedAfter !== 0) && (
+            {hasPostponed && (
               <div className="text-xs text-stone-500 space-y-1">
                 <p className="font-medium text-stone-600">Μεταφέρονται στον επόμενο μήνα:</p>
-                {final.manos.owedAfter !== 0 && <CarryLine party="manos" value={final.manos.owedAfter} />}
-                {final.eirini.owedAfter !== 0 && <CarryLine party="eirini" value={final.eirini.owedAfter} />}
+                {botanicosAction === 'postpone' && botanicosBal !== 0 && <CarryLine party="botanicos" value={botanicosBal} />}
+                {personAction.manos === 'postpone' && final.manos.owedAfter !== 0 && <CarryLine party="manos" value={final.manos.owedAfter} />}
+                {personAction.eirini === 'postpone' && final.eirini.owedAfter !== 0 && <CarryLine party="eirini" value={final.eirini.owedAfter} />}
               </div>
             )}
           </div>
@@ -298,6 +360,16 @@ export default function MonthlyClose({ onClosed }) {
         confirmText="Clear"
         destructive
         onConfirm={() => pendingClear && clearPerson(pendingClear)}
+      />
+      <ConfirmDialog
+        open={!!remoteConflict}
+        onOpenChange={() => {}}
+        title="Νεότερες αλλαγές από άλλη συσκευή"
+        description="Το εκκρεμές κλείσιμο άλλαξε σε άλλη συσκευή. Μπορείς να φορτώσεις εκείνες τις αλλαγές ή να κρατήσεις και να αποθηκεύσεις τις τωρινές δικές σου."
+        confirmText="Φόρτωση νεότερων"
+        cancelText="Κράτησε τα δικά μου"
+        onConfirm={loadRemoteDraft}
+        onCancel={keepLocalDraft}
       />
     </div>
   );
@@ -349,27 +421,31 @@ function DepositDecision({ party, due, paid, history, value, action, onChange, o
   const info = owedInfo(party, 0);
   const remaining = round2(Math.max(due - paid, 0));
   const enteredAmount = round2(parseFloat(value) || 0);
+  const hasUnconfirmedAmount = enteredAmount !== 0;
   const settlesExactly = remaining > 0 && enteredAmount === remaining;
-  const settled = action === 'ok' && remaining === 0;
+  const resolved = (action === 'ok' && remaining === 0) || action === 'postpone';
   let runningBalance = due;
   const historyRows = history.map((item) => {
     runningBalance = round2(Math.max(runningBalance - item.amount, 0));
     return { ...item, remaining: item.remaining ?? runningBalance };
   });
   return (
-    <div className={`space-y-2 rounded-lg border p-3 transition-colors ${settled ? 'border-stone-200 bg-stone-200/70' : 'border-stone-200 bg-white'}`}>
-      <div className={`flex justify-between gap-3 ${settled ? 'opacity-35 grayscale' : ''}`}>
+    <div className={`space-y-2 rounded-lg border p-3 transition-colors ${resolved ? 'border-stone-200 bg-stone-200/80' : 'border-stone-200 bg-white'}`}>
+      <div className={`flex justify-between gap-3 ${resolved ? 'opacity-20 grayscale' : ''}`}>
         <Label>{info.party.subject} κατέθεσε</Label>
         <span className="text-xs text-stone-500">Αρχικό: {fmt(due)}</span>
       </div>
       <div className="flex flex-col sm:flex-row gap-2">
-        <Input disabled={settled} type="number" step="0.01" min="0" value={value} onChange={(e) => onChange(e.target.value)} className={`bg-white tabular-nums ${settled ? 'opacity-35 grayscale' : ''}`} />
+        <Input disabled={resolved} type="number" step="0.01" min="0" value={value} onChange={(e) => onChange(e.target.value)} className={`bg-white tabular-nums ${resolved ? 'opacity-20 grayscale' : ''}`} />
         <Button type="button" size="sm" variant="outline" onClick={onClear}>Clear</Button>
-        <Button disabled={settled} type="button" size="sm" variant={action === 'ok' ? 'default' : 'outline'} className={settled ? 'opacity-35 grayscale' : ''} onClick={onOk}>{settlesExactly || action === 'ok' ? 'Τακτοποιήθηκε' : 'OK'}</Button>
-        <Button disabled={settled} type="button" size="sm" variant={action === 'postpone' ? 'default' : 'outline'} className={settled ? 'opacity-35 grayscale' : ''} onClick={onPostpone}>Postpone</Button>
+        <Button disabled={resolved} type="button" size="sm" variant={action === 'ok' ? 'default' : 'outline'} className={resolved ? 'opacity-20 grayscale' : ''} onClick={onOk}>{settlesExactly || action === 'ok' ? 'Τακτοποιήθηκε' : 'OK'}</Button>
+        <Button disabled={resolved || hasUnconfirmedAmount} type="button" size="sm" variant={action === 'postpone' ? 'default' : 'outline'} className={resolved ? 'opacity-20 grayscale' : ''} onClick={onPostpone}>Postpone</Button>
       </div>
+      {!resolved && hasUnconfirmedAmount && (
+        <p className="text-xs text-amber-700">Πάτησε πρώτα OK/Τακτοποιήθηκε ή Clear πριν το Postpone.</p>
+      )}
       {history.length > 0 && (
-        <div className={`space-y-1 border-t border-stone-200 pt-2 ${settled ? 'opacity-35 grayscale' : ''}`}>
+        <div className={`space-y-1 border-t border-stone-200 pt-2 ${resolved ? 'opacity-20 grayscale' : ''}`}>
           {historyRows.map((item, index) => (
             <div key={index} className="flex justify-between gap-3 text-xs">
               <span className="text-stone-500">Κατέθεσε {fmt(item.amount)}</span>
@@ -378,7 +454,7 @@ function DepositDecision({ party, due, paid, history, value, action, onChange, o
           ))}
         </div>
       )}
-      <div className={`flex justify-between text-xs ${settled ? 'opacity-35 grayscale' : ''}`}>
+      <div className={`flex justify-between text-xs ${resolved ? 'opacity-20 grayscale' : ''}`}>
         <span className="text-stone-500">{action === 'postpone' ? 'Μεταφέρεται' : 'Υπόλοιπο'}</span>
         <span className="font-semibold tabular-nums text-stone-800">{fmt(remaining)}</span>
       </div>

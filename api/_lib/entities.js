@@ -22,7 +22,7 @@ export const ENTITIES = {
   Settlement: {
     table: 'settlement',
     columns: [
-      'month', 'year', 'enteredBalance', 'targetReserve', 'refillAmount', 'shareEach',
+      'month', 'year', 'operationId', 'enteredBalance', 'targetReserve', 'refillAmount', 'shareEach',
       'manosOwedBefore', 'manosOwedAfter', 'manosOffset', 'manosContribution',
       'eiriniOwedBefore', 'eiriniOwedAfter', 'eiriniOffset', 'eiriniContribution',
       'botanicosBalanceBefore', 'timestamp',
