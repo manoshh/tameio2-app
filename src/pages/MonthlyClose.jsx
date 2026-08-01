@@ -300,11 +300,17 @@ export default function MonthlyClose({ onClosed }) {
       </div>
 
       <Dialog open={settleOpen} onOpenChange={() => {}}>
-        <DialogContent hideClose onEscapeKeyDown={(e) => e.preventDefault()} onPointerDownOutside={(e) => e.preventDefault()} onInteractOutside={(e) => e.preventDefault()}>
+        <DialogContent
+          hideClose
+          className="w-[calc(100%-1.5rem)] max-h-[88dvh] max-w-lg overflow-y-auto rounded-xl p-4 shadow-2xl sm:w-full sm:max-h-[90vh] sm:p-6"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
-            <DialogTitle>Επιβεβαίωση κλεισίματος</DialogTitle>
+            <DialogTitle className="text-base sm:text-lg">Επιβεβαίωση κλεισίματος</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 text-sm text-stone-700">
+          <div className="space-y-2 text-xs text-stone-700 sm:space-y-3 sm:text-sm">
             {botanicosBal !== 0 && (
               <div className={`rounded-lg border p-3 space-y-1 transition-colors ${botanicosAction ? 'border-stone-200 bg-stone-200/80' : 'border-amber-300 bg-amber-50'}`}>
                 <p className={`font-medium ${botanicosAction ? 'text-stone-500 opacity-20 grayscale' : 'text-amber-900'}`}>
@@ -346,9 +352,9 @@ export default function MonthlyClose({ onClosed }) {
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" disabled={busy} onClick={cancelClose}>Cancel</Button>
-            <Button className="bg-emerald-700 hover:bg-emerald-800" disabled={busy || (botanicosBal !== 0 && !botanicosAction) || !personAction.manos || !personAction.eirini} onClick={run}>Επιβεβαίωση</Button>
+          <DialogFooter className="sticky -bottom-4 z-10 -mx-4 -mb-4 border-t border-stone-200 bg-white/95 px-4 py-3 shadow-[0_-8px_18px_-14px_rgba(0,0,0,0.35)] backdrop-blur sm:static sm:m-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+            <Button className="h-9" variant="outline" disabled={busy} onClick={cancelClose}>Cancel</Button>
+            <Button className="h-9 bg-emerald-700 hover:bg-emerald-800" disabled={busy || (botanicosBal !== 0 && !botanicosAction) || !personAction.manos || !personAction.eirini} onClick={run}>Επιβεβαίωση</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
