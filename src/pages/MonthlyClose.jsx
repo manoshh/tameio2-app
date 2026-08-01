@@ -212,7 +212,11 @@ export default function MonthlyClose({ onClosed }) {
                   value={depositInput[party]}
                   action={personAction[party]}
                   onChange={(value) => setDepositInput((p) => ({ ...p, [party]: value }))}
-                  onClear={() => setDepositInput((p) => ({ ...p, [party]: '0' }))}
+                  onClear={() => {
+                    setPaid((p) => ({ ...p, [party]: 0 }));
+                    setDepositInput((p) => ({ ...p, [party]: '0' }));
+                    setPersonAction((p) => ({ ...p, [party]: null }));
+                  }}
                   onOk={() => applyDeposit(party)}
                   onPostpone={() => setPersonAction((p) => ({ ...p, [party]: 'postpone' }))}
                 />
