@@ -28,6 +28,7 @@ export default function MonthlyClose({ onClosed }) {
   const [personAction, setPersonAction] = useState({ manos: null, eirini: null });
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [pendingClear, setPendingClear] = useState(null);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
   const [operationId, setOperationId] = useState(null);
   const [remoteConflict, setRemoteConflict] = useState(null);
   const [saveNonce, setSaveNonce] = useState(0);
@@ -199,6 +200,7 @@ export default function MonthlyClose({ onClosed }) {
     setBusy(true);
     try {
       await settlements.cancelCloseDraft();
+      setCancelConfirmOpen(false);
       setSettleOpen(false);
       setPaid({ manos: 0, eirini: 0 });
       setDepositHistory({ manos: [], eirini: [] });
@@ -353,7 +355,7 @@ export default function MonthlyClose({ onClosed }) {
             )}
           </div>
           <DialogFooter className="sticky -bottom-4 z-10 -mx-4 -mb-4 border-t border-stone-200 bg-white/95 px-4 py-3 shadow-[0_-8px_18px_-14px_rgba(0,0,0,0.35)] backdrop-blur sm:static sm:m-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
-            <Button className="h-9" variant="outline" disabled={busy} onClick={cancelClose}>Cancel</Button>
+            <Button className="h-9" variant="outline" disabled={busy} onClick={() => setCancelConfirmOpen(true)}>Cancel</Button>
             <Button className="h-9 bg-emerald-700 hover:bg-emerald-800" disabled={busy || (botanicosBal !== 0 && !botanicosAction) || !personAction.manos || !personAction.eirini} onClick={run}>Επιβεβαίωση</Button>
           </DialogFooter>
         </DialogContent>
@@ -376,6 +378,16 @@ export default function MonthlyClose({ onClosed }) {
         cancelText="Κράτησε τα δικά μου"
         onConfirm={loadRemoteDraft}
         onCancel={keepLocalDraft}
+      />
+      <ConfirmDialog
+        open={cancelConfirmOpen}
+        onOpenChange={setCancelConfirmOpen}
+        title="Ακύρωση κλεισίματος;"
+        description="Θα διαγραφούν όλες οι προσωρινές καταθέσεις, το ιστορικό και οι επιλογές από όλες τις συσκευές. Καμία εγγραφή δεν θα αρχειοθετηθεί."
+        confirmText="Ακύρωση κλεισίματος"
+        cancelText="Επιστροφή"
+        destructive
+        onConfirm={cancelClose}
       />
     </div>
   );
