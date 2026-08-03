@@ -216,6 +216,10 @@ const OPERATIONS = {
 
       const closeDetails = {
         personActions: actions,
+        initialDue: {
+          manos: computed.manos.contribution,
+          eirini: computed.eirini.contribution,
+        },
         depositHistory: reportHistory,
         botanicos: { action: botanicosAction, balance: botanicosBalance },
       };

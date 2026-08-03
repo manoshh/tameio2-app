@@ -581,29 +581,34 @@ function CloseReport({ report }) {
         const action = details.personActions?.[party]
           || (report[`${party}OwedAfter`] !== 0 ? 'postpone' : 'ok');
         const fallbackContribution = report[`${party}Contribution`];
+        const initialDue = details.initialDue?.[party]
+          ?? (history.length ? history.reduce((sum, item) => sum + Number(item.amount || 0), Number(history.at(-1)?.remaining || 0)) : fallbackContribution);
+        const postponed = action === 'postpone'
+          ? (history.at(-1)?.remaining ?? report[`${party}OwedAfter`])
+          : 0;
         return (
           <div key={party} className="rounded-md bg-stone-50 px-3 py-2">
             <div className="flex justify-between gap-3 font-medium text-stone-700">
-              <span>{names[party]}</span>
-              <span>{action === 'postpone' ? 'Postpone' : 'Τακτοποιήθηκε'}</span>
+              <span>{names[party]} · {fmt(initialDue)}</span>
+              <span>{action === 'postpone' ? `Μεταφέρθηκαν ${fmt(postponed)}` : 'Τακτοποιήθηκε'}</span>
             </div>
             {history.length > 0 ? history.map((item, index) => (
               <div key={index} className="mt-1 flex justify-between gap-3">
-                <span>Κατέθεσε {fmt(item.amount)}</span>
+                <span>+ {fmt(item.amount)}</span>
                 <span>Υπόλοιπο {fmt(item.remaining)}</span>
               </div>
-            )) : (
+            )) : fallbackContribution > 0 ? (
               <div className="mt-1 flex justify-between gap-3">
-                <span>Συνολική κατάθεση</span><span>{fmt(fallbackContribution)}</span>
+                <span>+ {fmt(fallbackContribution)}</span><span>Υπόλοιπο 0,00 €</span>
               </div>
-            )}
+            ) : null}
           </div>
         );
       })}
       {report.botanicosBalanceBefore !== 0 && (
         <div className="flex justify-between gap-3 rounded-md bg-amber-50 px-3 py-2 text-amber-900">
-          <span>Βοτανικός</span>
-          <span>{details.botanicos?.action === 'postpone' ? `Postpone · ${fmt(Math.abs(report.botanicosBalanceBefore))}` : `Τακτοποιήθηκε · ${fmt(Math.abs(report.botanicosBalanceBefore))}`}</span>
+          <span>Βοτανικός · {fmt(Math.abs(report.botanicosBalanceBefore))}</span>
+          <span>{details.botanicos?.action === 'postpone' ? 'Μεταφέρθηκαν' : 'Τακτοποιήθηκε'}</span>
         </div>
       )}
     </div>
