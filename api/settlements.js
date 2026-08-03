@@ -67,7 +67,27 @@ async function ensureCloseDraftTable(client) {
 
 async function ensureSettlementOperationId(client) {
   await client.query('alter table settlement add column if not exists "operationId" text');
+  await client.query("alter table settlement add column if not exists \"closeDetails\" jsonb not null default '{}'::jsonb");
   await client.query('create unique index if not exists settlement_operation_id_idx on settlement ("operationId") where "operationId" is not null');
+}
+
+const MONTH_NAMES = ['Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
+
+function carryLabel(month, year) {
+  return `Μεταφορά από ${MONTH_NAMES[month - 1]} '${String(year).slice(-2)}`;
+}
+
+function normalizeDepositHistory(raw, contribution, paid) {
+  const amounts = Array.isArray(raw) ? raw.map((item) => Number(item?.amount)) : [];
+  if (amounts.some((amount) => !Number.isFinite(amount) || amount <= 0)) throw new HttpError(400, 'Μη έγκυρο ιστορικό καταθέσεων');
+  if (!amounts.length && paid > 0) amounts.push(paid); // Συμβατότητα με παλιό client/draft.
+  const total = round2(amounts.reduce((sum, amount) => sum + amount, 0));
+  if (total !== round2(paid)) throw new HttpError(400, 'Το ιστορικό δεν συμφωνεί με το σύνολο των καταθέσεων');
+  let running = round2(contribution);
+  return amounts.map((amount) => {
+    running = round2(running - amount);
+    return { amount: round2(amount), remaining: Math.max(running, 0) };
+  });
 }
 
 const OPERATIONS = {
@@ -113,7 +133,7 @@ const OPERATIONS = {
   // Ο client στέλνει μόνο μετρημένα γεγονότα: το υπόλοιπο του κουτιού και πόσα
   // κατέθεσε πράγματι ο καθένας. Ποτέ υπολογισμένα ποσά — αυτά τα βγάζει ο
   // server από τις εγγραφές της βάσης.
-  async close({ enteredBalance, contributions, botanicosAction = 'settled', operationId }) {
+  async close({ enteredBalance, contributions, botanicosAction = 'settled', personActions, depositHistory, operationId }) {
     const entered = Number(enteredBalance);
     if (!Number.isFinite(entered)) throw new HttpError(400, 'Μη έγκυρο υπόλοιπο');
     if (!['settled', 'postpone'].includes(botanicosAction)) {
@@ -156,6 +176,20 @@ const OPERATIONS = {
         eirini: paid.eirini !== undefined ? applyActualContribution(computed.eirini, paid.eirini) : computed.eirini,
       };
 
+      const actions = {};
+      const reportHistory = {};
+      for (const person of ['manos', 'eirini']) {
+        const action = personActions?.[person];
+        if (action !== undefined && !['ok', 'postpone'].includes(action)) throw new HttpError(400, `Μη έγκυρη επιλογή για ${person}`);
+        if (action === 'ok' && round2(paid[person] ?? computed[person].contribution) !== round2(computed[person].contribution)) {
+          throw new HttpError(400, `Η οφειλή του ${person} δεν έχει τακτοποιηθεί πλήρως`);
+        }
+        actions[person] = action || (calc[person].owedAfter === 0 ? 'ok' : 'postpone');
+        reportHistory[person] = normalizeDepositHistory(
+          depositHistory?.[person], computed[person].contribution, calc[person].contribution
+        );
+      }
+
       const now = new Date();
       const timestamp = now.toISOString();
       const fallback = { month: now.getMonth() + 1, year: now.getFullYear() };
@@ -165,23 +199,37 @@ const OPERATIONS = {
       const period = periodFromEntries(activePerson, fallback);
       const { month, year } = period;
 
-      // 1) Διακανονισμός Βοτανικού (μετά την τραπεζική μεταφορά)
-      if (botanicosBalance !== 0 && botanicosAction === 'settled') {
+      // 1) Ομαδοποίηση Βοτανικού. Στο postpone οι παλιές εγγραφές μπαίνουν
+      // στο αρχείο και μένει μία νέα συγκεντρωτική ενεργή εγγραφή.
+      if (botanicosBalance !== 0) {
         const bp = periodFromEntries(activeBotanicos, fallback);
         const bs = await createBotanicosSettlement(client, { month: bp.month, year: bp.year, balanceBefore: botanicosBalance, timestamp });
         await archiveEntries(client, activeBotanicos.map((e) => e.id), bs.id);
+        if (botanicosAction === 'postpone') {
+          await client.query(
+            `insert into ledger_entry (module, amount, description, date, "settlementId", "carryOverSettlementId")
+             values ('botanicos', $1, $2, $3, '', $4)`,
+            [botanicosBalance, carryLabel(bp.month, bp.year), timestamp.slice(0, 10), bs.id]
+          );
+        }
       }
+
+      const closeDetails = {
+        personActions: actions,
+        depositHistory: reportHistory,
+        botanicos: { action: botanicosAction, balance: botanicosBalance },
+      };
 
       // 2) Στιγμιότυπο διακανονισμού ατόμων
       const { rows } = await client.query(
         `insert into settlement (
-           month, year, "operationId", "enteredBalance", "targetReserve", "refillAmount", "shareEach",
+           month, year, "closeDetails", "operationId", "enteredBalance", "targetReserve", "refillAmount", "shareEach",
            "manosOwedBefore", "manosOwedAfter", "manosOffset", "manosContribution",
            "eiriniOwedBefore", "eiriniOwedAfter", "eiriniOffset", "eiriniContribution",
            "botanicosBalanceBefore", "timestamp"
-         ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning *`,
+         ) values ($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) returning *`,
         [
-          month, year, operationId || null, calc.enteredBalance, calc.targetReserve, calc.refillAmount, calc.shareEach,
+          month, year, JSON.stringify(closeDetails), operationId || null, calc.enteredBalance, calc.targetReserve, calc.refillAmount, calc.shareEach,
           calc.manos.owedBefore, calc.manos.owedAfter, calc.manos.offset, calc.manos.contribution,
           calc.eirini.owedBefore, calc.eirini.owedAfter, calc.eirini.offset, calc.eirini.contribution,
           botanicosBalance, timestamp,
@@ -197,9 +245,7 @@ const OPERATIONS = {
       const today = timestamp.slice(0, 10);
       for (const [person, result] of [['manos', calc.manos], ['eirini', calc.eirini]]) {
         if (result.owedAfter === 0) continue;
-        const label = result.owedAfter > 0
-          ? `Πίστωση από κλείσιμο ${month}/${year}`
-          : `Οφειλή από κλείσιμο ${month}/${year}`;
+        const label = carryLabel(month, year);
         await client.query(
           `insert into ledger_entry (module, person, amount, description, date, "settlementId", "carryOverSettlementId")
            values ('person', $1, $2, $3, $4, '', $5)`,
@@ -290,6 +336,7 @@ const OPERATIONS = {
       if (!rows[0]) throw new HttpError(404, 'Δεν υπάρχει διακανονισμός προς αναίρεση');
       const latest = deserializeRow(ENTITIES.BotanicosSettlement, rows[0]);
 
+      await client.query('delete from ledger_entry where "carryOverSettlementId" = $1', [latest.id]);
       await client.query('update ledger_entry set "settlementId" = \'\', updated_date = now() where "settlementId" = $1', [latest.id]);
       await client.query('delete from botanicos_settlement where id = $1', [latest.id]);
 

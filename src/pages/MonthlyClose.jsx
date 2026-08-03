@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
 
-import { listAllEntries, getSettings, fmt } from '@/lib/api';
+import { listAllEntries, listSettlements, getSettings, fmt, monthLabel } from '@/lib/api';
 import { round2, sumActive, computeMonthlyClose, applyActualContribution } from '@shared/finance';
 import { owedInfo } from '@/lib/labels';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -33,6 +33,7 @@ export default function MonthlyClose({ onClosed }) {
   const { toast } = useToast();
   const [settings, setSettings] = useState(null);
   const [entries, setEntries] = useState([]);
+  const [closeReports, setCloseReports] = useState([]);
   const [entered, setEntered] = useState('');
   const [paid, setPaid] = useState({ manos: 0, eirini: 0 });
   const [depositHistory, setDepositHistory] = useState({ manos: [], eirini: [] });
@@ -67,8 +68,8 @@ export default function MonthlyClose({ onClosed }) {
   };
 
   const reload = async () => {
-    const [e, s] = await Promise.all([listAllEntries(), getSettings()]);
-    setEntries(e); setSettings(s);
+    const [e, s, reports] = await Promise.all([listAllEntries(), getSettings(), listSettlements()]);
+    setEntries(e); setSettings(s); setCloseReports(reports);
   };
 
   useEffect(() => { reload(); }, []);
@@ -229,7 +230,10 @@ export default function MonthlyClose({ onClosed }) {
     try {
       // Ο server ξαναϋπολογίζει τα πάντα από τις εγγραφές· εδώ στέλνουμε μόνο
       // μετρημένα γεγονότα: το υπόλοιπο και πόσα κατέθεσε πράγματι ο καθένας.
-      await settlements.close(enteredNum, actual, botanicosAction || 'settled', operationId);
+      await settlements.close(enteredNum, actual, botanicosAction || 'settled', operationId, {
+        personActions: personAction,
+        depositHistory,
+      });
       setSettleOpen(false);
       toast({ title: 'Το κλείσιμο ολοκληρώθηκε' });
       await reload();
@@ -346,6 +350,8 @@ export default function MonthlyClose({ onClosed }) {
           </CardContent>
         </Card>
       </div>
+
+      <CloseHistory reports={closeReports} />
 
       <Dialog open={settleOpen} onOpenChange={() => {}}>
         <DialogContent
@@ -542,6 +548,64 @@ function PersonResult({ party, computed }) {
         <span className="text-stone-500">Καταθέτει</span>
         <span className="tabular-nums font-semibold text-stone-900">{fmt(computed.contribution)}</span>
       </div>
+    </div>
+  );
+}
+
+function CloseHistory({ reports }) {
+  return (
+    <details className="mt-6 rounded-xl border border-stone-200 bg-white shadow-sm">
+      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-stone-700">
+        Ιστορικό κλεισιμάτων ({reports.length})
+      </summary>
+      <div className="max-h-96 divide-y divide-stone-100 overflow-y-auto border-t border-stone-100 px-4">
+        {reports.length === 0 ? (
+          <p className="py-5 text-center text-sm text-stone-400">Δεν υπάρχουν ακόμη επιτυχημένα κλεισίματα.</p>
+        ) : reports.map((report) => <CloseReport key={report.id} report={report} />)}
+      </div>
+    </details>
+  );
+}
+
+function CloseReport({ report }) {
+  const details = report.closeDetails || {};
+  const names = { manos: 'Μάνος', eirini: 'Ειρήνη' };
+  return (
+    <div className="space-y-2 py-4 text-xs text-stone-600">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm font-semibold text-stone-800">{monthLabel(report.month, report.year)}</span>
+        <span className="text-stone-400">{new Date(report.timestamp).toLocaleDateString('el-GR')}</span>
+      </div>
+      {['manos', 'eirini'].map((party) => {
+        const history = details.depositHistory?.[party] || [];
+        const action = details.personActions?.[party]
+          || (report[`${party}OwedAfter`] !== 0 ? 'postpone' : 'ok');
+        const fallbackContribution = report[`${party}Contribution`];
+        return (
+          <div key={party} className="rounded-md bg-stone-50 px-3 py-2">
+            <div className="flex justify-between gap-3 font-medium text-stone-700">
+              <span>{names[party]}</span>
+              <span>{action === 'postpone' ? 'Postpone' : 'Τακτοποιήθηκε'}</span>
+            </div>
+            {history.length > 0 ? history.map((item, index) => (
+              <div key={index} className="mt-1 flex justify-between gap-3">
+                <span>Κατέθεσε {fmt(item.amount)}</span>
+                <span>Υπόλοιπο {fmt(item.remaining)}</span>
+              </div>
+            )) : (
+              <div className="mt-1 flex justify-between gap-3">
+                <span>Συνολική κατάθεση</span><span>{fmt(fallbackContribution)}</span>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {report.botanicosBalanceBefore !== 0 && (
+        <div className="flex justify-between gap-3 rounded-md bg-amber-50 px-3 py-2 text-amber-900">
+          <span>Βοτανικός</span>
+          <span>{details.botanicos?.action === 'postpone' ? `Postpone · ${fmt(Math.abs(report.botanicosBalanceBefore))}` : `Τακτοποιήθηκε · ${fmt(Math.abs(report.botanicosBalanceBefore))}`}</span>
+        </div>
+      )}
     </div>
   );
 }

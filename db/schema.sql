@@ -68,6 +68,7 @@ alter table settings drop column if exists "botanicosBalance";
 create table if not exists settlement (
   id                      uuid primary key default gen_random_uuid(),
   "operationId"           text unique,
+  "closeDetails"          jsonb not null default '{}'::jsonb,
   month                   integer not null check (month between 1 and 12),
   year                    integer not null,
   "enteredBalance"        numeric(12,2) not null default 0,

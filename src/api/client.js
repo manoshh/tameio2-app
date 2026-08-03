@@ -64,8 +64,11 @@ export const db = {
 export const settlements = {
   // `contributions` = πόσα κατέθεσε πράγματι ο καθένας ({ manos, eirini }).
   // Αν λείπει, ισχύουν τα ποσά που υπολογίζει ο server.
-  close: (enteredBalance, contributions, botanicosAction = 'settled', operationId) =>
-    rpc('/api/settlements', { op: 'close', args: { enteredBalance, contributions, botanicosAction, operationId } }),
+  close: (enteredBalance, contributions, botanicosAction = 'settled', operationId, details = {}) =>
+    rpc('/api/settlements', { op: 'close', args: {
+      enteredBalance, contributions, botanicosAction, operationId,
+      personActions: details.personActions, depositHistory: details.depositHistory,
+    } }),
   getCloseDraft: () => rpc('/api/settlements', { op: 'getCloseDraft' }),
   saveCloseDraft: (state, expectedRevision = 0) => rpc('/api/settlements', { op: 'saveCloseDraft', args: { state, expectedRevision } }),
   cancelCloseDraft: () => rpc('/api/settlements', { op: 'cancelCloseDraft' }),
