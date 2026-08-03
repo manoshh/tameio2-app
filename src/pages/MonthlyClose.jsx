@@ -14,6 +14,21 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 
 const LEGACY_PENDING_CLOSE_KEY = 'tameio.pendingClose';
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((out, key) => {
+      out[key] = canonicalJson(value[key]);
+      return out;
+    }, {});
+  }
+  return value;
+}
+
+function sameDraft(a, b) {
+  return JSON.stringify(canonicalJson(a)) === JSON.stringify(canonicalJson(b));
+}
+
 export default function MonthlyClose({ onClosed }) {
   const { toast } = useToast();
   const [settings, setSettings] = useState(null);
@@ -34,6 +49,8 @@ export default function MonthlyClose({ onClosed }) {
   const [saveNonce, setSaveNonce] = useState(0);
   const draftRevision = useRef(0);
   const savingDraft = useRef(false);
+  const latestDraft = useRef(null);
+  const saveQueued = useRef(false);
 
   const applyDraft = (draft) => {
     setEntered(draft.entered || '');
@@ -112,23 +129,49 @@ export default function MonthlyClose({ onClosed }) {
     setBotanicosAction(null);
   }, [suggestedManos, suggestedEirini, settleOpen, draftLoaded]);
 
+  const persistLatestDraft = async () => {
+    if (savingDraft.current) {
+      saveQueued.current = true;
+      return;
+    }
+    const attempted = latestDraft.current;
+    if (!attempted) return;
+
+    savingDraft.current = true;
+    let blockedByConflict = false;
+    try {
+      const result = await settlements.saveCloseDraft(attempted, draftRevision.current);
+      draftRevision.current = result.revision;
+    } catch (err) {
+      if (err.status === 409) {
+        const latest = await settlements.getCloseDraft();
+        if (sameDraft(latest.draft, attempted)) {
+          // Δική μας αποθήκευση που ολοκληρώθηκε πριν φτάσει η απάντηση.
+          draftRevision.current = latest.revision;
+        } else {
+          blockedByConflict = true;
+          setRemoteConflict(latest);
+        }
+      } else {
+        toast({ title: 'Δεν αποθηκεύτηκε το κλείσιμο', description: err.message, variant: 'destructive' });
+      }
+    } finally {
+      savingDraft.current = false;
+      const changedWhileSaving = !sameDraft(latestDraft.current, attempted);
+      const shouldRunAgain = !blockedByConflict && (saveQueued.current || changedWhileSaving);
+      saveQueued.current = false;
+      if (shouldRunAgain) persistLatestDraft();
+    }
+  };
+
   useEffect(() => {
     if (!draftLoaded || !settleOpen) return;
+    latestDraft.current = {
+      open: true, entered, paid, depositHistory, depositInput, botanicosAction, personAction, operationId,
+      manosDue: suggestedManos, eiriniDue: suggestedEirini,
+    };
     const timer = window.setTimeout(() => {
-      savingDraft.current = true;
-      settlements.saveCloseDraft({
-        open: true, entered, paid, depositHistory, depositInput, botanicosAction, personAction, operationId,
-        manosDue: suggestedManos, eiriniDue: suggestedEirini,
-      }, draftRevision.current).then((result) => {
-        draftRevision.current = result.revision;
-      }).catch(async (err) => {
-        if (err.status === 409) {
-          const latest = await settlements.getCloseDraft();
-          setRemoteConflict(latest);
-        } else {
-          toast({ title: 'Δεν αποθηκεύτηκε το κλείσιμο', description: err.message, variant: 'destructive' });
-        }
-      }).finally(() => { savingDraft.current = false; });
+      persistLatestDraft();
     }, 300);
     return () => window.clearTimeout(timer);
   }, [draftLoaded, settleOpen, entered, paid, depositHistory, depositInput, botanicosAction, personAction, operationId, suggestedManos, suggestedEirini, saveNonce, toast]);
@@ -139,7 +182,10 @@ export default function MonthlyClose({ onClosed }) {
       if (savingDraft.current || remoteConflict) return;
       try {
         const latest = await settlements.getCloseDraft();
-        if (latest.draft?.open && latest.revision > draftRevision.current) setRemoteConflict(latest);
+        if (latest.draft?.open && latest.revision > draftRevision.current) {
+          if (sameDraft(latest.draft, latestDraft.current)) draftRevision.current = latest.revision;
+          else setRemoteConflict(latest);
+        }
       } catch {
         // Η αποθήκευση θα εμφανίσει το σφάλμα αν υπάρχει πρόβλημα σύνδεσης.
       }
